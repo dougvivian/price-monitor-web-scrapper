@@ -1,7 +1,8 @@
 # Este programa sera usado para monitorar precos de concorrentes.
-
+import csv
 # datetime permite registrar a data e hora em que coletamos o preco.
 from datetime import datetime
+from time import sleep
 
 # requests faz a requisicao HTTP para acessar o HTML da pagina.
 import requests
@@ -18,14 +19,12 @@ def extrair_dados_produto(html, url):
     # Ele procura o span que contem o preco de venda do produto.
     seletor_preco = ".vtex-product-price-1-x-sellingPrice"
     seletor_titulo = ".vtex-store-components-3-x-productNameContainer"
+    seletor_indisponivel = ".vtex-availability-notify-1-x-title"
 
     # select_one procura o primeiro elemento que combina com o seletor CSS.
     elemento_preco = soup.select_one(seletor_preco)
     elemento_titulo = soup.select_one(seletor_titulo)
-
-    if elemento_preco is None:
-        print("Preco nao encontrado no HTML recebido pelo requests.")
-        return None
+    elemento_indisponivel = soup.select_one(seletor_indisponivel)
 
     if elemento_titulo is None:
         print("Titulo nao encontrado no HTML recebido pelo requests.")
@@ -34,18 +33,39 @@ def extrair_dados_produto(html, url):
     # get_text(strip=True) pega somente o texto visivel e remove espacos/quebras das pontas.
     titulo = elemento_titulo.get_text(strip=True)
 
+    # Registramos a data e hora em que o nosso programa viu este produto.
+    data_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if elemento_preco is None:
+        if elemento_indisponivel is not None:
+            mensagem = elemento_indisponivel.get_text(strip=True)
+
+            return {
+                "produto_nome": titulo,
+                "preco_texto": "",
+                "preco_numero": "",
+                "status_produto": "indisponivel",
+                "mensagem": mensagem,
+                "url": url,
+                "data_coleta": data_coleta,
+            }
+
+        print("Preco nao encontrado no HTML recebido pelo requests.")
+        return None
+
     # Aqui pegamos apenas o texto do elemento HTML.
     # No site testado, o texto vem assim: "R$61,90/un".
     preco_texto = elemento_preco.get_text(strip=True)
 
     # Para comparar precos, precisamos transformar o texto em numero.
-    # Por isso removemos "R$", removemos a unidade "/un",
+    # Por isso removemos "R$", removemos unidades como "/un" e "/m²",
     # trocamos a virgula decimal brasileira por ponto
     # e tiramos espacos extras com strip().
     preco_limpo = (
         preco_texto
         .replace("R$", "")
         .replace("/un", "")
+        .replace("/m²", "")
         .replace(".", "")
         .replace(",", ".")
         .strip()
@@ -55,14 +75,13 @@ def extrair_dados_produto(html, url):
     # Exemplo: "61.90" vira 61.9.
     preco_numero = float(preco_limpo)
 
-    # Registramos a data e hora em que o nosso programa viu este preco.
-    data_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     # Um dicionario guarda os dados em pares de chave e valor.
     dados_produto = {
         "produto_nome": titulo,
         "preco_texto": preco_texto,
         "preco_numero": preco_numero,
+        "status_produto": "disponivel",
+        "mensagem": "",
         "url": url,
         "data_coleta": data_coleta,
     }
@@ -128,7 +147,7 @@ urls = [
 
 dados_coletados = []
 
-for url in urls:
+for url in urls[20:25]:
     print("Coletando:", url)
 
     # Aqui fazemos a requisicao para o site.
@@ -146,5 +165,33 @@ for url in urls:
         print("Dados coletados:")
         print(dados_produto)
 
+    # Fazemos uma pausa para nao enviar muitas requisicoes seguidas ao site.
+    sleep(1)
+
 print("Total de produtos coletados:")
 print(len(dados_coletados))
+
+# Escrevemos os dados coletados em um arquivo CSV.
+with open("dados_produtos.csv", "w", newline="", encoding="utf-8") as arquivo_csv:
+    # Estes nomes precisam ser iguais as chaves do dicionario dados_produto.
+    # Eles tambem viram o cabecalho/primeira linha do CSV.
+    campos = [
+        "produto_nome",
+        "preco_texto",
+        "preco_numero",
+        "status_produto",
+        "mensagem",
+        "url",
+        "data_coleta",
+    ]
+
+    # DictWriter e um escritor de CSV preparado para receber dicionarios.
+    # O fieldnames informa quais campos/colunas o arquivo vai ter.
+    # Usamos ponto e virgula como separador porque funciona melhor no Excel em portugues.
+    escritor_csv = csv.DictWriter(arquivo_csv, fieldnames=campos, delimiter=";")
+
+    # Escreve a primeira linha do CSV com o nome das colunas.
+    escritor_csv.writeheader()
+
+    # Escreve uma linha para cada dicionario dentro da lista dados_coletados.
+    escritor_csv.writerows(dados_coletados)
