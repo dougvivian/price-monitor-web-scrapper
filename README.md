@@ -1,18 +1,18 @@
 # Competitor Price Monitor
 
-Projeto desenvolvido em Python para monitorar preços de materiais de construção em sites concorrentes.
+Projeto de estudo em Python para monitorar precos de concorrentes, salvar historico e gerar relatorios para apoio a decisoes comerciais.
 
-## Tecnologias
+## Objetivo
 
-- Python
-- Requests
-- BeautifulSoup
-- Pandas
-- Git/GitHub
+Construir o projeto do zero, passo a passo, aprendendo:
 
-## Objetivos
+- Python aplicado a automacao.
+- Web scraping.
+- Organizacao de codigo.
+- Banco de dados.
+- Geracao de relatorios.
+- Git e GitHub.
 
-- Coletar preços automaticamente
-- Armazenar histórico
-- Gerar relatórios
-- Comparar preços entre concorrentes
+## Primeiro marco
+
+Criar um programa Python simples que inicia o monitor de precos.
