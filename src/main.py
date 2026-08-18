@@ -14,6 +14,14 @@ ARQUIVO_PRODUTOS = PASTA_PROJETO / "dados" / "produtos.csv"
 ARQUIVO_COLETAS = PASTA_PROJETO / "dados" / "coletas.csv"
 ARQUIVO_ERROS = PASTA_PROJETO / "dados" / "erros.csv"
 
+SELETORES_POR_CONCORRENTE = {
+    "Loja A": {
+        "preco": ".vtex-product-price-1-x-sellingPrice",
+        "titulo": ".vtex-store-components-3-x-productNameContainer",
+        "indisponivel": ".vtex-availability-notify-1-x-title",
+    }
+}
+
 
 def ler_produtos():
     produtos = []
@@ -30,21 +38,24 @@ def ler_produtos():
     return produtos
 
 
+def buscar_seletores(concorrente):
+    if concorrente not in SELETORES_POR_CONCORRENTE:
+        raise ValueError(f"Concorrente sem seletores cadastrados: {concorrente}")
+
+    return SELETORES_POR_CONCORRENTE[concorrente]
+
+
 def extrair_dados_produto(html, produto):
     url = produto["url"]
+    seletores = buscar_seletores(produto["concorrente"])
 
     # Transformamos o texto HTML em um objeto que o Python consegue pesquisar melhor.
     soup = BeautifulSoup(html, "html.parser")
 
-    # Estes seletores vieram do Inspecionar do navegador.
-    seletor_preco = ".vtex-product-price-1-x-sellingPrice"
-    seletor_titulo = ".vtex-store-components-3-x-productNameContainer"
-    seletor_indisponivel = ".vtex-availability-notify-1-x-title"
-
     # select_one procura o primeiro elemento que combina com o seletor CSS.
-    elemento_preco = soup.select_one(seletor_preco)
-    elemento_titulo = soup.select_one(seletor_titulo)
-    elemento_indisponivel = soup.select_one(seletor_indisponivel)
+    elemento_preco = soup.select_one(seletores["preco"])
+    elemento_titulo = soup.select_one(seletores["titulo"])
+    elemento_indisponivel = soup.select_one(seletores["indisponivel"])
 
     if elemento_titulo is None:
         raise ValueError("Titulo nao encontrado no HTML recebido pelo requests.")
