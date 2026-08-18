@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 PASTA_PROJETO = Path(__file__).resolve().parent.parent
 ARQUIVO_PRODUTOS = PASTA_PROJETO / "dados" / "produtos.csv"
 ARQUIVO_COLETAS = PASTA_PROJETO / "dados" / "coletas.csv"
+ARQUIVO_ERROS = PASTA_PROJETO / "dados" / "erros.csv"
 
 
 def ler_produtos():
@@ -46,8 +47,7 @@ def extrair_dados_produto(html, produto):
     elemento_indisponivel = soup.select_one(seletor_indisponivel)
 
     if elemento_titulo is None:
-        print("Titulo nao encontrado no HTML recebido pelo requests.")
-        return None
+        raise ValueError("Titulo nao encontrado no HTML recebido pelo requests.")
 
     # get_text(strip=True) pega somente o texto visivel e remove espacos/quebras das pontas.
     titulo = elemento_titulo.get_text(strip=True)
@@ -71,8 +71,7 @@ def extrair_dados_produto(html, produto):
                 "data_coleta": data_coleta,
             }
 
-        print("Preco nao encontrado no HTML recebido pelo requests.")
-        return None
+        raise ValueError("Preco nao encontrado no HTML recebido pelo requests.")
 
     # Aqui pegamos apenas o texto do elemento HTML.
     # Exemplos: "R$61,90/un" ou "R$56,90/m2".
@@ -85,6 +84,9 @@ def extrair_dados_produto(html, produto):
 
     # Convertemos o texto limpo para float.
     # Exemplo: "61.90" vira 61.9.
+    if preco_limpo == "":
+        raise ValueError(f"Preco vazio apos limpeza: {preco_texto}")
+
     preco_numero = float(preco_limpo)
 
     # Um dicionario guarda os dados em pares de chave e valor.
@@ -103,6 +105,22 @@ def extrair_dados_produto(html, produto):
     return dados_produto
 
 
+def salvar_linhas_csv(caminho_arquivo, campos, linhas):
+    if len(linhas) == 0:
+        return
+
+    arquivo_vazio = not caminho_arquivo.exists() or caminho_arquivo.stat().st_size == 0
+
+    # Usamos "a" para acrescentar novas linhas no historico, sem apagar as anteriores.
+    with open(caminho_arquivo, "a", newline="", encoding="utf-8") as arquivo_csv:
+        escritor_csv = csv.DictWriter(arquivo_csv, fieldnames=campos, delimiter=";")
+
+        if arquivo_vazio:
+            escritor_csv.writeheader()
+
+        escritor_csv.writerows(linhas)
+
+
 def salvar_coletas(dados_coletados):
     campos = [
         "produto_id",
@@ -116,40 +134,75 @@ def salvar_coletas(dados_coletados):
         "data_coleta",
     ]
 
-    arquivo_vazio = not ARQUIVO_COLETAS.exists() or ARQUIVO_COLETAS.stat().st_size == 0
+    salvar_linhas_csv(ARQUIVO_COLETAS, campos, dados_coletados)
 
-    # Usamos "a" para acrescentar novas coletas no historico, sem apagar as anteriores.
-    with open(ARQUIVO_COLETAS, "a", newline="", encoding="utf-8") as arquivo_csv:
-        escritor_csv = csv.DictWriter(arquivo_csv, fieldnames=campos, delimiter=";")
 
-        if arquivo_vazio:
-            escritor_csv.writeheader()
+def salvar_erros(erros_coleta):
+    campos = [
+        "produto_id",
+        "concorrente",
+        "url",
+        "tipo_erro",
+        "mensagem",
+        "data_erro",
+    ]
 
-        escritor_csv.writerows(dados_coletados)
+    salvar_linhas_csv(ARQUIVO_ERROS, campos, erros_coleta)
+
+
+def criar_erro(produto, tipo_erro, mensagem):
+    return {
+        "produto_id": produto["produto_id"],
+        "concorrente": produto["concorrente"],
+        "url": produto["url"],
+        "tipo_erro": tipo_erro,
+        "mensagem": mensagem,
+        "data_erro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 produtos = ler_produtos()
 dados_coletados = []
+erros_coleta = []
 
-# Durante o desenvolvimento, usamos apenas os 5 primeiros produtos ativos.
-for produto in produtos[:5]:
-    print("Coletando:", produto["produto_id"], produto["url"])
+for produto in produtos:
+    try:
+        resposta = requests.get(produto["url"], timeout=8)
 
-    resposta = requests.get(produto["url"])
+        if resposta.status_code != 200:
+            erro_coleta = criar_erro(
+                produto,
+                "status_http",
+                f"Status HTTP inesperado: {resposta.status_code}",
+            )
+            erros_coleta.append(erro_coleta)
+            salvar_erros([erro_coleta])
+            sleep(1)
+            continue
 
-    print("Status:", resposta.status_code)
-
-    dados_produto = extrair_dados_produto(resposta.text, produto)
-
-    if dados_produto is not None:
+        dados_produto = extrair_dados_produto(resposta.text, produto)
         dados_coletados.append(dados_produto)
-        print("Dados coletados:")
-        print(dados_produto)
+        salvar_coletas([dados_produto])
+
+    except requests.RequestException as erro:
+        erro_coleta = criar_erro(produto, "requisicao", str(erro))
+        erros_coleta.append(erro_coleta)
+        salvar_erros([erro_coleta])
+
+    except ValueError as erro:
+        erro_coleta = criar_erro(produto, "extracao", str(erro))
+        erros_coleta.append(erro_coleta)
+        salvar_erros([erro_coleta])
+
+    except Exception as erro:
+        erro_coleta = criar_erro(produto, "erro_inesperado", str(erro))
+        erros_coleta.append(erro_coleta)
+        salvar_erros([erro_coleta])
 
     # Fazemos uma pausa para nao enviar muitas requisicoes seguidas ao site.
     sleep(1)
 
-print("Total de produtos coletados:")
-print(len(dados_coletados))
-
-salvar_coletas(dados_coletados)
+print("Resumo da coleta")
+print("Produtos ativos:", len(produtos))
+print("Produtos atualizados:", len(dados_coletados))
+print("Produtos com erro:", len(erros_coleta))
