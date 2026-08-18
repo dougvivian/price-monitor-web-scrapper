@@ -50,9 +50,10 @@ def criar_card_produto(produto_id, historico):
     linhas_historico = "\n".join(criar_linha_historico(coleta) for coleta in historico)
     status = ultima_coleta["status_produto"]
     classe_status = "status-indisponivel" if status == "indisponivel" else "status-disponivel"
+    texto_busca = f"{produto_id} {ultima_coleta['produto_nome']} {ultima_coleta['concorrente']}".lower()
 
     return f"""
-        <details class="produto-card">
+        <details class="produto-card" data-status="{escape(status)}" data-busca="{escape(texto_busca)}">
             <summary>
                 <div class="produto-principal">
                     <span class="produto-id">{escape(produto_id)}</span>
@@ -99,9 +100,13 @@ def criar_linha_erro(erro):
 
 def gerar_html(coletas, erros):
     coletas_por_produto = agrupar_coletas_por_produto(coletas)
+    produtos_ordenados = sorted(
+        coletas_por_produto.items(),
+        key=lambda item: item[1][0]["produto_nome"].lower(),
+    )
     cards_produtos = "\n".join(
         criar_card_produto(produto_id, historico)
-        for produto_id, historico in sorted(coletas_por_produto.items())
+        for produto_id, historico in produtos_ordenados
     )
     linhas_erros = "\n".join(criar_linha_erro(erro) for erro in erros[-20:])
     data_geracao = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -168,6 +173,50 @@ def gerar_html(coletas, erros):
             display: block;
             font-size: 28px;
             margin-bottom: 4px;
+        }}
+
+        .controles {{
+            display: grid;
+            grid-template-columns: minmax(240px, 1fr) auto;
+            gap: 12px;
+            align-items: center;
+            margin: 16px 0;
+        }}
+
+        .busca {{
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #c9d3dd;
+            border-radius: 8px;
+            font-size: 16px;
+            padding: 11px 12px;
+        }}
+
+        .filtros {{
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }}
+
+        .filtro-status {{
+            border: 1px solid #c9d3dd;
+            border-radius: 8px;
+            background: #ffffff;
+            color: #1f2933;
+            cursor: pointer;
+            font-weight: 700;
+            padding: 10px 12px;
+        }}
+
+        .filtro-status.ativo {{
+            background: #1f2933;
+            border-color: #1f2933;
+            color: #ffffff;
+        }}
+
+        .contador-filtro {{
+            color: #607080;
+            margin-bottom: 12px;
         }}
 
         .produto-card {{
@@ -278,6 +327,10 @@ def gerar_html(coletas, erros):
                 grid-template-columns: 1fr;
             }}
 
+            .controles {{
+                grid-template-columns: 1fr;
+            }}
+
             .produto-meta {{
                 margin-top: 10px;
             }}
@@ -311,6 +364,15 @@ def gerar_html(coletas, erros):
         <section>
             <h2>Produtos</h2>
             <p class="subtitulo">Clique em um produto para abrir o historico de precos.</p>
+            <div class="controles">
+                <input class="busca" id="buscaProduto" type="search" placeholder="Buscar por produto, ID ou concorrente">
+                <div class="filtros" aria-label="Filtro de status">
+                    <button class="filtro-status ativo" type="button" data-status="todos">Todos</button>
+                    <button class="filtro-status" type="button" data-status="disponivel">Disponiveis</button>
+                    <button class="filtro-status" type="button" data-status="indisponivel">Indisponiveis</button>
+                </div>
+            </div>
+            <p class="contador-filtro" id="contadorFiltro"></p>
             {cards_produtos}
         </section>
 
@@ -332,6 +394,49 @@ def gerar_html(coletas, erros):
             </table>
         </section>
     </main>
+    <script>
+        const buscaProduto = document.querySelector("#buscaProduto");
+        const contadorFiltro = document.querySelector("#contadorFiltro");
+        const botoesFiltro = document.querySelectorAll(".filtro-status");
+        const cardsProdutos = document.querySelectorAll(".produto-card");
+        let statusSelecionado = "todos";
+
+        function aplicarFiltros() {{
+            const termoBusca = buscaProduto.value.trim().toLowerCase();
+            let totalVisivel = 0;
+
+            cardsProdutos.forEach((card) => {{
+                const textoBusca = card.dataset.busca;
+                const status = card.dataset.status;
+                const combinaBusca = textoBusca.includes(termoBusca);
+                const combinaStatus = statusSelecionado === "todos" || status === statusSelecionado;
+                const visivel = combinaBusca && combinaStatus;
+
+                card.style.display = visivel ? "" : "none";
+
+                if (visivel) {{
+                    totalVisivel += 1;
+                }}
+            }});
+
+            contadorFiltro.textContent = `${{totalVisivel}} produto(s) encontrado(s)`;
+        }}
+
+        buscaProduto.addEventListener("input", aplicarFiltros);
+
+        botoesFiltro.forEach((botao) => {{
+            botao.addEventListener("click", () => {{
+                statusSelecionado = botao.dataset.status;
+
+                botoesFiltro.forEach((item) => item.classList.remove("ativo"));
+                botao.classList.add("ativo");
+
+                aplicarFiltros();
+            }});
+        }});
+
+        aplicarFiltros();
+    </script>
 </body>
 </html>
 """
