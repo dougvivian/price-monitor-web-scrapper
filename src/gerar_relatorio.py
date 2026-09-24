@@ -7,7 +7,7 @@ from pathlib import Path
 import banco
 # Reaproveitamos do main.py o caminho do banco e a formatacao de preco,
 # para nao repetir o mesmo codigo em dois lugares.
-from main import ARQUIVO_BANCO, formatar_preco
+from main import ARQUIVO_BANCO, calcular_variacao, formatar_preco
 
 
 PASTA_PROJETO = Path(__file__).resolve().parent.parent
@@ -36,6 +36,51 @@ def agrupar_coletas_por_produto(coletas):
     return coletas_por_produto
 
 
+def formatar_variacao(percentual):
+    # 211.4 -> "▲ +211,4%"   |   -3.2 -> "▼ -3,2%"   (seta + sinal + formato brasileiro)
+    seta = "▲" if percentual > 0 else "▼"
+    return f"{seta} {percentual:+.1f}%".replace(".", ",")
+
+
+def variacao_desde_coleta_anterior(historico):
+    # historico esta do mais recente para o mais antigo.
+    # Compara o preco mais recente com o preco anterior (ignorando coletas sem preco).
+    # Devolve a variacao em % ou None se nao houver dois precos para comparar.
+    if historico[0]["preco"] is None:
+        return None
+
+    precos = [coleta["preco"] for coleta in historico if coleta["preco"] is not None]
+
+    if len(precos) < 2:
+        return None
+
+    return calcular_variacao(precos[1], precos[0]) * 100
+
+
+def erros_da_ultima_execucao(erros, ultima_execucao):
+    # Erros gravados a partir do inicio da ultima coleta.
+    # Como as datas estao no formato "AAAA-MM-DD HH:MM:SS", comparar o texto ja compara as datas.
+    if ultima_execucao is None:
+        return []
+
+    return [erro for erro in erros if erro["data_erro"] >= ultima_execucao["inicio"]]
+
+
+def criar_resumo_execucao(ultima_execucao):
+    if ultima_execucao is None:
+        return "Nenhuma coleta registrada ainda."
+
+    if ultima_execucao["fim"] is None:
+        return f"Ultima coleta iniciada em {ultima_execucao['inicio']} e interrompida antes do fim."
+
+    return (
+        f"Ultima coleta: {ultima_execucao['inicio']} | "
+        f"{ultima_execucao['coletados']} coletados, "
+        f"{ultima_execucao['erros']} erros, "
+        f"{ultima_execucao['alertas']} alertas"
+    )
+
+
 def criar_linha_historico(coleta):
     return f"""
         <tr>
@@ -48,8 +93,23 @@ def criar_linha_historico(coleta):
     """
 
 
-def criar_card_produto(produto_id, historico):
+def criar_card_produto(produto_id, historico, teve_erro_na_ultima_coleta=False):
     ultima_coleta = historico[0]
+
+    # Variacao em relacao a coleta anterior: so aparece quando o preco mudou.
+    variacao = variacao_desde_coleta_anterior(historico)
+    selo_variacao = ""
+
+    if variacao:
+        classe_variacao = "variacao-alta" if variacao > 0 else "variacao-queda"
+        selo_variacao = f'<span class="{classe_variacao}">{escape(formatar_variacao(variacao))}</span>'
+
+    # Se o produto deu erro na coleta mais recente, o preco mostrado pode estar desatualizado.
+    selo_erro = ""
+
+    if teve_erro_na_ultima_coleta:
+        selo_erro = '<span class="status status-erro">erro na ultima coleta</span>'
+
     linhas_historico = "\n".join(criar_linha_historico(coleta) for coleta in historico)
     status = ultima_coleta["status_produto"]
     classe_status = "status-indisponivel" if status == "indisponivel" else "status-disponivel"
@@ -61,10 +121,13 @@ def criar_card_produto(produto_id, historico):
                 <div class="produto-principal">
                     <span class="produto-id">{escape(produto_id)}</span>
                     <span class="produto-nome">{escape(ultima_coleta["produto_nome"])}</span>
+                    <span class="data-coleta">coletado em {escape(ultima_coleta["data_coleta"])}</span>
                 </div>
                 <div class="produto-meta">
                     <span class="preco">{escape(ultima_coleta["preco_texto"] or "Sem preco")}</span>
+                    {selo_variacao}
                     <span class="status {classe_status}">{escape(status)}</span>
+                    {selo_erro}
                     <a href="{escape(ultima_coleta["url"])}" target="_blank" rel="noopener noreferrer">Ver no site</a>
                 </div>
             </summary>
@@ -105,7 +168,6 @@ def criar_linha_alerta(alerta, nomes_produtos):
     # Seta e cor mostram se o preco subiu ou caiu.
     variacao = alerta["variacao_percentual"]
     classe_variacao = "variacao-alta" if variacao > 0 else "variacao-queda"
-    seta = "▲" if variacao > 0 else "▼"
 
     # Nome do produto a partir das coletas; se o produto nunca foi coletado, fica so o ID.
     nome_produto = nomes_produtos.get(alerta["produto_id"], "")
@@ -116,31 +178,61 @@ def criar_linha_alerta(alerta, nomes_produtos):
             <td><strong>{escape(alerta["produto_id"])}</strong> {escape(nome_produto)}</td>
             <td>{escape(formatar_preco(alerta["preco_anterior"]))}</td>
             <td>{escape(formatar_preco(alerta["preco_novo"]))}</td>
-            <td class="{classe_variacao}">{seta} {variacao:+.1f}%</td>
+            <td class="{classe_variacao}">{escape(formatar_variacao(variacao))}</td>
             <td><a href="{escape(alerta["url"])}" target="_blank" rel="noopener noreferrer">Ver no site</a></td>
         </tr>
     """
 
 
-def gerar_html(coletas, erros, alertas):
+def criar_tabela_erros(erros, mensagem_vazia):
+    linhas = "\n".join(criar_linha_erro(erro) for erro in erros)
+
+    if linhas == "":
+        linhas = f"""
+            <tr>
+                <td colspan="5">{escape(mensagem_vazia)}</td>
+            </tr>
+        """
+
+    return f"""
+        <table>
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Produto</th>
+                    <th>Tipo</th>
+                    <th>Mensagem</th>
+                    <th>Link</th>
+                </tr>
+            </thead>
+            <tbody>
+                {linhas}
+            </tbody>
+        </table>
+    """
+
+
+def gerar_html(coletas, erros, alertas, ultima_execucao=None):
     coletas_por_produto = agrupar_coletas_por_produto(coletas)
+
+    # Separamos os erros da ultima coleta (o que precisa de atencao agora)
+    # dos erros antigos (so para consulta; mostramos os 20 mais recentes).
+    erros_recentes = erros_da_ultima_execucao(erros, ultima_execucao)
+    erros_antigos = [erro for erro in erros if erro not in erros_recentes][-20:]
+    produtos_com_erro = {erro["produto_id"] for erro in erros_recentes}
+
     produtos_ordenados = sorted(
         coletas_por_produto.items(),
         key=lambda item: item[1][0]["produto_nome"].lower(),
     )
     cards_produtos = "\n".join(
-        criar_card_produto(produto_id, historico)
+        criar_card_produto(produto_id, historico, produto_id in produtos_com_erro)
         for produto_id, historico in produtos_ordenados
     )
-    linhas_erros = "\n".join(criar_linha_erro(erro) for erro in erros[-20:])
+    tabela_erros_recentes = criar_tabela_erros(erros_recentes, "Nenhum erro na ultima coleta.")
+    tabela_erros_antigos = criar_tabela_erros(list(reversed(erros_antigos)), "Nenhum erro anterior.")
+    resumo_execucao = criar_resumo_execucao(ultima_execucao)
     data_geracao = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    if linhas_erros == "":
-        linhas_erros = """
-            <tr>
-                <td colspan="5">Nenhum erro registrado.</td>
-            </tr>
-        """
 
     # Dicionario produto_id -> nome da ultima coleta, usado na tabela de alertas.
     nomes_produtos = {
@@ -300,6 +392,11 @@ def gerar_html(coletas, erros, alertas):
             font-weight: 700;
         }}
 
+        .data-coleta {{
+            color: #607080;
+            font-size: 13px;
+        }}
+
         .preco {{
             font-weight: 700;
             font-size: 18px;
@@ -320,6 +417,22 @@ def gerar_html(coletas, erros, alertas):
         .status-indisponivel {{
             background: #fff3d9;
             color: #9a5b00;
+        }}
+
+        .status-erro {{
+            background: #fde8e7;
+            color: #b42318;
+        }}
+
+        .erros-antigos {{
+            margin-top: 16px;
+        }}
+
+        .erros-antigos summary {{
+            display: block;
+            padding: 8px 0;
+            color: #607080;
+            font-weight: 700;
         }}
 
         a {{
@@ -401,6 +514,7 @@ def gerar_html(coletas, erros, alertas):
             <div>
                 <h1>Monitor de Precos</h1>
                 <p class="subtitulo">Relatorio gerado em {escape(data_geracao)}</p>
+                <p class="subtitulo">{escape(resumo_execucao)}</p>
             </div>
         </header>
 
@@ -462,21 +576,17 @@ def gerar_html(coletas, erros, alertas):
         </section>
 
         <section class="secao-erros">
-            <h2>Ultimos Erros</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Data</th>
-                        <th>Produto</th>
-                        <th>Tipo</th>
-                        <th>Mensagem</th>
-                        <th>Link</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {linhas_erros}
-                </tbody>
-            </table>
+            <h2>Erros da Ultima Coleta</h2>
+            <p class="subtitulo">
+                Produtos com erro na coleta mais recente mostram o ultimo preco que deu certo,
+                marcado com "erro na ultima coleta".
+            </p>
+            {tabela_erros_recentes}
+
+            <details class="erros-antigos">
+                <summary>Erros anteriores ({len(erros_antigos)} mais recentes)</summary>
+                {tabela_erros_antigos}
+            </details>
         </section>
     </main>
     <script>
@@ -535,10 +645,11 @@ def main():
         coletas = [preparar_coleta(coleta) for coleta in banco.listar_coletas(conexao)]
         erros = banco.listar_erros(conexao)
         alertas = banco.listar_alertas(conexao)
+        ultima_execucao = banco.buscar_ultima_execucao(conexao)
     finally:
         conexao.close()
 
-    html = gerar_html(coletas, erros, alertas)
+    html = gerar_html(coletas, erros, alertas, ultima_execucao)
 
     ARQUIVO_RELATORIO.parent.mkdir(exist_ok=True)
 
