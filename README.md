@@ -8,7 +8,6 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)
 ![pytest](https://img.shields.io/badge/testes-107-0A9EDC?logo=pytest&logoColor=white)
-[![Licença MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-green)](LICENSE)
 
 [Sobre](#sobre) ·
 [Experimente](#experimente-em-1-minuto) ·
