@@ -25,14 +25,16 @@ produto por produto. O projeto tambem e um estudo de automacao, coleta e tratame
   Se o mesmo preco aparecer de novo na coleta seguinte, ele e considerado confirmado e
   e salvo (assim um aumento real nao fica bloqueado para sempre).
 - Roda sozinho todo dia (Agendador de Tarefas do Windows) e grava um log de cada execucao.
-- Gera `relatorios/relatorio.html` com:
-  - resumo da ultima coleta;
-  - alertas de variacao de preco;
-  - comparativo entre lojas: o mesmo produto (mesmo EAN) ou produtos equivalentes
-    (mesmo `grupo` no cadastro), do mais barato para o mais caro;
-  - ultimo preco de cada produto, com a variacao desde a coleta anterior;
-  - historico, busca e filtro por disponibilidade;
-  - erros da ultima coleta separados dos anteriores.
+- Gera `relatorios/relatorio.html`, uma pagina com menu lateral e abas:
+  - **Visao geral:** indicadores, maiores diferencas de preco entre lojas e precos que mudaram;
+  - **Comparador:** o mesmo produto (mesmo EAN) ou produtos equivalentes (mesmo `grupo`
+    no cadastro), do mais barato para o mais caro, com filtro por categoria;
+  - **Produtos:** tabela com busca, filtros (loja, categoria, status) e ordenacao por coluna;
+  - **Historico:** grafico de linha (SVG, sem biblioteca) e tabela de cada produto;
+  - **Alertas** e **Erros** (os da ultima coleta separados dos anteriores).
+
+  O relatorio e um arquivo so (CSS e JavaScript vao dentro dele), funciona no celular e
+  tem modo escuro automatico.
 
 Funciona com lojas que publicam dados estruturados **schema.org** (JSON-LD) nas paginas
 de produto, padrao comum no varejo online brasileiro. Testado em lojas **VTEX** e
@@ -89,6 +91,9 @@ src/
   coleta_diaria.py     roda coleta + relatorio e grava log (usado no agendamento)
   banco.py             acesso ao banco SQLite (todo o SQL do projeto fica aqui)
   gerar_relatorio.py   gera o relatorio HTML
+  relatorio/
+    estilo.css         visual do relatorio (cores e espacamentos em variaveis no topo)
+    interacao.js       abas, filtros e ordenacao (JavaScript puro)
 dados/
   produtos.exemplo.csv modelo do cadastro de produtos
   produtos.csv         cadastro real dos produtos monitorados (editavel no Excel, fora do Git)
@@ -164,6 +169,12 @@ sozinho o mesmo produto em lojas diferentes. Mas produtos equivalentes de marcas
 diferentes (ex.: o mesmo ferro CA50 10mm de outro fabricante) tem EANs diferentes e
 tambem interessam na comparacao. Para esses, a coluna opcional `grupo` do cadastro da
 o mesmo codigo aos equivalentes. Quando existe, o grupo tem prioridade sobre o EAN.
+
+**Relatorio em um arquivo so, mas editavel.** O CSS e o JavaScript ficam em arquivos
+proprios (`src/relatorio/`), faceis de editar, e sao copiados para dentro do HTML na hora
+de gerar. Assim o relatorio pode ser enviado sozinho (e-mail, WhatsApp) sem perder o
+visual. O HTML de cada aba e montado no Python, o que permite testa-lo com pytest; o
+JavaScript cuida so da interacao (abas, filtros, ordenacao).
 
 **Testes sem internet.** As paginas de teste sao sinteticas e o `requests.get` e
 trocado por um site falso (`monkeypatch`). Os testes sao rapidos, repetiveis e nao

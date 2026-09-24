@@ -1,4 +1,10 @@
 # Este programa gera um relatorio HTML com as ultimas coletas de precos.
+#
+# O relatorio e uma pagina com menu lateral e abas:
+#   Visao geral | Comparador | Produtos | Historico | Alertas | Erros
+# O HTML de cada aba e montado aqui no Python (facil de testar com pytest).
+# O visual fica em src/relatorio/estilo.css e a interacao (abas, filtros, ordenacao)
+# em src/relatorio/interacao.js.
 from collections import defaultdict
 from html import escape
 from pathlib import Path
@@ -20,10 +26,18 @@ PASTA_MODELO = Path(__file__).resolve().parent / "relatorio"
 ARQUIVO_ESTILO = PASTA_MODELO / "estilo.css"
 ARQUIVO_SCRIPT = PASTA_MODELO / "interacao.js"
 
+# Quantos itens mostrar nas listas resumidas.
+LIMITE_MAIORES_DIFERENCAS = 5
+LIMITE_VARIACOES_RECENTES = 8
+LIMITE_ALERTAS = 50
+LIMITE_ERROS_ANTIGOS = 20
+
 
 def ler_arquivo_modelo(caminho):
     return caminho.read_text(encoding="utf-8")
 
+
+# ---------- Preparacao dos dados ----------
 
 def preparar_coleta(coleta):
     # O banco guarda o preco como numero (ou None quando indisponivel).
@@ -51,6 +65,11 @@ def formatar_variacao(percentual):
     # 211.4 -> "▲ +211,4%"   |   -3.2 -> "▼ -3,2%"   (seta + sinal + formato brasileiro)
     seta = "▲" if percentual > 0 else "▼"
     return f"{seta} {percentual:+.1f}%".replace(".", ",")
+
+
+def formatar_percentual(percentual):
+    # 20.0 -> "20,0%"   (sem seta: usado nas diferencas entre lojas)
+    return f"{percentual:.1f}%".replace(".", ",")
 
 
 def variacao_desde_coleta_anterior(historico):
@@ -82,6 +101,21 @@ def separar_erros(erros, ultima_execucao):
     return recentes, antigos
 
 
+def criar_resumo_execucao(ultima_execucao):
+    if ultima_execucao is None:
+        return "Nenhuma coleta registrada ainda."
+
+    if ultima_execucao["fim"] is None:
+        return f"Ultima coleta iniciada em {ultima_execucao['inicio']} e interrompida antes do fim."
+
+    return (
+        f"Ultima coleta: {ultima_execucao['inicio']} | "
+        f"{ultima_execucao['coletados']} coletados, "
+        f"{ultima_execucao['erros']} erros, "
+        f"{ultima_execucao['alertas']} alertas"
+    )
+
+
 def ler_grupos(cadastro):
     # Dicionario produto_id -> grupo, a partir da coluna opcional "grupo" do produtos.csv.
     # O grupo e um codigo que NOS damos para produtos equivalentes em lojas diferentes
@@ -96,6 +130,17 @@ def ler_grupos(cadastro):
 
     return grupos
 
+
+def ler_categorias(cadastro):
+    # Dicionario produto_id -> categoria (coluna "categoria" do produtos.csv), usado nos filtros.
+    return {
+        linha["produto_id"]: (linha.get("categoria") or "").strip()
+        for linha in cadastro
+        if (linha.get("categoria") or "").strip()
+    }
+
+
+# ---------- Comparativo entre lojas ----------
 
 def chave_comparacao(produto_id, historico, grupos):
     # Define com quem o produto vai ser comparado:
@@ -134,22 +179,182 @@ def montar_comparativos(coletas_por_produto, grupos):
     }
 
 
-def criar_card_comparativo(chave, ultimas_coletas):
-    # Ordena do mais barato para o mais caro; sem preco (indisponivel) vai para o fim.
+def ordenar_por_preco(ultimas_coletas):
+    # Do mais barato para o mais caro; sem preco (indisponivel) vai para o fim.
     # A chave de ordenacao e uma tupla: (True/False, preco). False vem antes de True.
-    ordenadas = sorted(
+    return sorted(
         ultimas_coletas,
         key=lambda coleta: (coleta["preco"] is None, coleta["preco"] or 0),
     )
-    precos = [coleta["preco"] for coleta in ordenadas if coleta["preco"] is not None]
 
-    # Diferenca entre o maior e o menor preco, em % sobre o menor.
-    resumo = "Menos de 2 precos disponiveis para comparar."
 
-    if len(precos) >= 2:
-        diferenca = calcular_variacao(precos[0], precos[-1]) * 100
-        diferenca_texto = f"{diferenca:.1f}".replace(".", ",")
-        resumo = f"O mais caro custa {diferenca_texto}% a mais que o mais barato."
+def menor_preco_por_loja(ultimas_coletas):
+    # Um grupo pode ter mais de um produto da mesma loja (ex.: duas marcas de telha na
+    # mesma medida). Para comparar LOJAS, ficamos com a opcao mais barata de cada uma.
+    # Resultado: lista com a coleta mais barata de cada loja, do menor para o maior preco.
+    melhores = {}
+
+    for coleta in ultimas_coletas:
+        if coleta["preco"] is None:
+            continue
+
+        loja = coleta["concorrente"]
+
+        if loja not in melhores or coleta["preco"] < melhores[loja]["preco"]:
+            melhores[loja] = coleta
+
+    return sorted(melhores.values(), key=lambda coleta: coleta["preco"])
+
+
+def diferenca_entre_lojas(ultimas_coletas):
+    # Quanto a loja mais cara cobra a mais que a mais barata, em %,
+    # comparando a opcao mais barata de cada loja.
+    # None quando menos de 2 lojas tem preco (ex.: produto indisponivel numa delas).
+    melhores = menor_preco_por_loja(ultimas_coletas)
+
+    if len(melhores) < 2:
+        return None
+
+    return calcular_variacao(melhores[0]["preco"], melhores[-1]["preco"]) * 100
+
+
+# ---------- Pedacos de HTML reaproveitados ----------
+
+def criar_selo_status(status):
+    classe = "selo-alerta" if status == "indisponivel" else "selo-ok"
+    return f'<span class="selo {classe}">{escape(status)}</span>'
+
+
+def criar_selo_variacao(variacao):
+    # Seta e cor mostram se o preco subiu ou caiu. Sem variacao, nao mostra nada.
+    if not variacao:
+        return ""
+
+    classe = "variacao-alta" if variacao > 0 else "variacao-queda"
+    return f'<span class="{classe}">{escape(formatar_variacao(variacao))}</span>'
+
+
+def criar_link_site(url):
+    # rel="noopener noreferrer": a pagina aberta nao consegue mexer na aba do relatorio.
+    return f'<a class="sem-quebra" href="{escape(url)}" target="_blank" rel="noopener noreferrer">Ver no site</a>'
+
+
+def criar_tabela(cabecalhos, linhas, mensagem_vazia, id_tabela=""):
+    # Monta uma tabela padrao do relatorio.
+    # cabecalhos: lista de (texto, classe). A classe "num" alinha numeros a direita.
+    # Sem linhas, mostra a mensagem_vazia ocupando a tabela toda (estado vazio).
+    celulas_cabecalho = "".join(
+        f'<th class="{classe}">{escape(texto)}</th>' for texto, classe in cabecalhos
+    )
+    corpo = "".join(linhas)
+
+    if corpo == "":
+        corpo = f'<tr><td class="vazio" colspan="{len(cabecalhos)}">{escape(mensagem_vazia)}</td></tr>'
+
+    atributo_id = f' id="{id_tabela}"' if id_tabela else ""
+
+    return f"""
+        <div class="tabela-rolagem">
+            <table{atributo_id}>
+                <thead><tr>{celulas_cabecalho}</tr></thead>
+                <tbody>{corpo}</tbody>
+            </table>
+        </div>
+    """
+
+
+# ---------- Aba: Visao geral ----------
+
+def criar_indicador(valor, texto, destaque=""):
+    # Cartao com um numero grande. destaque="alerta" pinta o numero de vermelho.
+    classe = f"indicador indicador-{destaque}" if destaque else "indicador"
+    return f"""
+        <div class="{classe}">
+            <strong>{valor}</strong>
+            <span>{escape(texto)}</span>
+        </div>
+    """
+
+
+def criar_maiores_diferencas(comparativos):
+    # As comparacoes com maior diferenca de preco entre lojas: onde vale mais a pena olhar.
+    com_diferenca = []
+
+    for chave, ultimas_coletas in comparativos.items():
+        diferenca = diferenca_entre_lojas(ultimas_coletas)
+
+        if diferenca is not None:
+            com_diferenca.append((diferenca, chave, menor_preco_por_loja(ultimas_coletas)))
+
+    # sort com key: ordena so pela diferenca (a maior primeiro).
+    com_diferenca.sort(key=lambda item: item[0], reverse=True)
+    linhas = []
+
+    for diferenca, chave, melhores in com_diferenca[:LIMITE_MAIORES_DIFERENCAS]:
+        # melhores: opcao mais barata de cada loja, do menor para o maior preco.
+        mais_barato = melhores[0]
+        mais_caro = melhores[-1]
+        linhas.append(f"""
+            <tr>
+                <td>{escape(chave)}</td>
+                <td>{escape(mais_barato["concorrente"])}</td>
+                <td class="num">{escape(mais_barato["preco_texto"])}</td>
+                <td>{escape(mais_caro["concorrente"])}</td>
+                <td class="num">{escape(mais_caro["preco_texto"])}</td>
+                <td class="num"><strong>{escape(formatar_percentual(diferenca))}</strong></td>
+            </tr>
+        """)
+
+    return criar_tabela(
+        [("Grupo", ""), ("Loja mais barata", ""), ("Preco", "num"),
+         ("Loja mais cara", ""), ("Preco", "num"), ("Diferenca", "num")],
+        linhas,
+        "Nenhuma comparacao com 2 lojas com preco ainda.",
+    )
+
+
+def criar_variacoes_recentes(coletas_por_produto):
+    # Produtos cujo preco mudou desde a coleta anterior, das maiores mudancas para as menores.
+    variacoes = []
+
+    for produto_id, historico in coletas_por_produto.items():
+        variacao = variacao_desde_coleta_anterior(historico)
+
+        if variacao:
+            variacoes.append((abs(variacao), variacao, produto_id, historico))
+
+    variacoes.sort(reverse=True)
+    linhas = []
+
+    for _, variacao, produto_id, historico in variacoes[:LIMITE_VARIACOES_RECENTES]:
+        ultima = historico[0]
+        linhas.append(f"""
+            <tr>
+                <td><a href="#historico/{escape(produto_id)}">{escape(ultima["produto_nome"])}</a></td>
+                <td>{escape(ultima["concorrente"])}</td>
+                <td class="num">{escape(ultima["preco_texto"])}</td>
+                <td class="num">{criar_selo_variacao(variacao)}</td>
+            </tr>
+        """)
+
+    return criar_tabela(
+        [("Produto", ""), ("Loja", ""), ("Preco atual", "num"), ("Variacao", "num")],
+        linhas,
+        "Nenhum preco mudou desde a coleta anterior.",
+    )
+
+
+# ---------- Aba: Comparador ----------
+
+def criar_card_comparativo(chave, ultimas_coletas, categoria=""):
+    ordenadas = ordenar_por_preco(ultimas_coletas)
+    tem_preco = ordenadas[0]["preco"] is not None
+    diferenca = diferenca_entre_lojas(ultimas_coletas)
+
+    resumo = "Menos de 2 lojas com preco disponivel para comparar."
+
+    if diferenca is not None:
+        resumo = f"A loja mais cara cobra {formatar_percentual(diferenca)} a mais que a mais barata."
 
     linhas = []
 
@@ -157,125 +362,226 @@ def criar_card_comparativo(chave, ultimas_coletas):
         # Selo "mais barato" so no primeiro da lista, e so se ele tiver preco.
         selo = ""
 
-        if precos and coleta is ordenadas[0]:
-            selo = ' <span class="status status-disponivel">mais barato</span>'
+        if tem_preco and coleta is ordenadas[0]:
+            selo = ' <span class="selo selo-ok">mais barato</span>'
 
         linhas.append(f"""
             <tr>
                 <td>{escape(coleta["concorrente"])}</td>
                 <td><strong>{escape(coleta["produto_id"])}</strong> {escape(coleta["produto_nome"])}</td>
-                <td>{escape(coleta["preco_texto"] or "Sem preco")}{selo}</td>
-                <td>{escape(coleta["status_produto"])}</td>
-                <td><a href="{escape(coleta["url"])}" target="_blank" rel="noopener noreferrer">Ver no site</a></td>
+                <td class="num">{escape(coleta["preco_texto"] or "Sem preco")}{selo}</td>
+                <td>{criar_selo_status(coleta["status_produto"])}</td>
+                <td>{criar_link_site(coleta["url"])}</td>
             </tr>
         """)
 
+    tabela = criar_tabela(
+        [("Loja", ""), ("Produto", ""), ("Preco", "num"), ("Status", ""), ("Link", "")],
+        linhas,
+        "",
+    )
+    selo_categoria = f'<span class="selo selo-neutro">{escape(categoria)}</span>' if categoria else ""
+
+    # data-* guardam os valores que o JavaScript usa para filtrar e ordenar os cards.
     return f"""
-        <div class="comparativo">
-            <h3>{escape(chave)}</h3>
-            <p class="subtitulo">{escape(resumo)}</p>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Loja</th>
-                        <th>Produto</th>
-                        <th>Preco</th>
-                        <th>Status</th>
-                        <th>Link</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {"".join(linhas)}
-                </tbody>
-            </table>
-        </div>
+        <article class="cartao comparativo" data-categoria="{escape(categoria)}"
+                 data-diferenca="{diferenca if diferenca is not None else -1}" data-nome="{escape(chave.lower())}">
+            <header class="cartao-cabecalho">
+                <h3>{escape(chave)}</h3>
+                {selo_categoria}
+            </header>
+            <p class="texto-suave">{escape(resumo)}</p>
+            {tabela}
+        </article>
     """
 
 
-def criar_resumo_execucao(ultima_execucao):
-    if ultima_execucao is None:
-        return "Nenhuma coleta registrada ainda."
+# ---------- Aba: Produtos ----------
 
-    if ultima_execucao["fim"] is None:
-        return f"Ultima coleta iniciada em {ultima_execucao['inicio']} e interrompida antes do fim."
+def criar_linha_produto(produto_id, historico, categoria, teve_erro_na_ultima_coleta):
+    ultima = historico[0]
+    variacao = variacao_desde_coleta_anterior(historico)
 
-    return (
-        f"Ultima coleta: {ultima_execucao['inicio']} | "
-        f"{ultima_execucao['coletados']} coletados, "
-        f"{ultima_execucao['erros']} erros, "
-        f"{ultima_execucao['alertas']} alertas"
+    # Se o produto deu erro na coleta mais recente, o preco mostrado pode estar desatualizado.
+    selo_erro = ""
+
+    if teve_erro_na_ultima_coleta:
+        selo_erro = ' <span class="selo selo-erro">erro na ultima coleta</span>'
+
+    texto_busca = f"{produto_id} {ultima['produto_nome']} {ultima['concorrente']} {categoria}".lower()
+    preco = ultima["preco"] if ultima["preco"] is not None else ""
+
+    # data-valor em cada celula e o valor "cru" usado para ordenar a coluna no JavaScript
+    # (ordenar "R$9,90" como texto colocaria depois de "R$10,00").
+    return f"""
+        <tr data-busca="{escape(texto_busca)}" data-status="{escape(ultima["status_produto"])}"
+            data-loja="{escape(ultima["concorrente"])}" data-categoria="{escape(categoria)}">
+            <td class="texto-suave sem-quebra" data-valor="{escape(produto_id)}">{escape(produto_id)}</td>
+            <td data-valor="{escape(ultima["produto_nome"].lower())}">
+                <a href="#historico/{escape(produto_id)}">{escape(ultima["produto_nome"])}</a>
+            </td>
+            <td data-valor="{escape(ultima["concorrente"])}">{escape(ultima["concorrente"])}</td>
+            <td data-valor="{escape(categoria)}">{escape(categoria)}</td>
+            <td class="num" data-valor="{preco}">{escape(ultima["preco_texto"] or "Sem preco")}</td>
+            <td class="num" data-valor="{variacao or 0}">{criar_selo_variacao(variacao)}</td>
+            <td data-valor="{escape(ultima["status_produto"])}">{criar_selo_status(ultima["status_produto"])}{selo_erro}</td>
+            <td class="texto-suave sem-quebra" data-valor="{escape(ultima["data_coleta"])}">{escape(ultima["data_coleta"])}</td>
+            <td>{criar_link_site(ultima["url"])}</td>
+        </tr>
+    """
+
+
+def criar_opcoes(valores, texto_todos):
+    # Opcoes de um <select> de filtro: "Todas" + cada valor, em ordem alfabetica.
+    opcoes = [f'<option value="">{escape(texto_todos)}</option>']
+    opcoes += [f'<option value="{escape(valor)}">{escape(valor)}</option>' for valor in sorted(valores)]
+    return "".join(opcoes)
+
+
+# ---------- Aba: Historico ----------
+
+def criar_grafico_svg(historico):
+    # Grafico de linha do preco, desenhado em SVG (formato de imagem feito de texto que o
+    # navegador entende). Sem biblioteca: calculamos a posicao de cada ponto na mao.
+    # historico esta do mais recente para o mais antigo; o grafico vai do antigo (esquerda)
+    # para o recente (direita). Coletas sem preco (indisponivel) ficam de fora.
+    pontos = [coleta for coleta in reversed(historico) if coleta["preco"] is not None]
+
+    if len(pontos) < 2:
+        return '<p class="texto-suave">O grafico aparece a partir de 2 coletas com preco.</p>'
+
+    # Tamanho do desenho. O SVG estica para a largura da tela mantendo a proporcao
+    # (5 x 1): numa tela de ~1000px, as medidas ficam perto do tamanho real em pixels.
+    largura, altura, margem = 1000, 200, 28
+    precos = [coleta["preco"] for coleta in pontos]
+    menor, maior = min(precos), max(precos)
+
+    def posicao_x(indice):
+        # Pontos espalhados por igual na largura (um por coleta).
+        return margem + indice * (largura - 2 * margem) / (len(pontos) - 1)
+
+    def posicao_y(preco):
+        # No SVG o y cresce para BAIXO, por isso subtraimos da altura.
+        # Preco que nunca mudou: linha reta no meio (evita divisao por zero).
+        if maior == menor:
+            return altura / 2
+        return altura - margem - (preco - menor) * (altura - 2 * margem) / (maior - menor)
+
+    coordenadas = [(posicao_x(i), posicao_y(coleta["preco"])) for i, coleta in enumerate(pontos)]
+    linha = " ".join(f"{x:.1f},{y:.1f}" for x, y in coordenadas)
+
+    # Cada ponto tem um <title>: o navegador mostra data e preco ao passar o mouse.
+    circulos = "".join(
+        f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4"><title>{escape(coleta["data_coleta"])}: '
+        f'{escape(coleta["preco_texto"])}</title></circle>'
+        for (x, y), coleta in zip(coordenadas, pontos)
     )
+    descricao = (
+        f"Preco de {pontos[0]['preco_texto']} em {pontos[0]['data_coleta']} "
+        f"a {pontos[-1]['preco_texto']} em {pontos[-1]['data_coleta']}"
+    )
+
+    # Rotulos de maior e menor preco; se o preco nunca mudou, um rotulo so.
+    if maior == menor:
+        rotulos = f'<text x="4" y="{altura / 2 - 12}" class="grafico-rotulo">preco estavel: {escape(formatar_preco(maior))}</text>'
+    else:
+        rotulos = (
+            f'<text x="4" y="{margem - 12}" class="grafico-rotulo">maior: {escape(formatar_preco(maior))}</text>'
+            f'<text x="4" y="{altura - 4}" class="grafico-rotulo">menor: {escape(formatar_preco(menor))}</text>'
+        )
+
+    return f"""
+        <figure class="grafico">
+            <svg viewBox="0 0 {largura} {altura}" role="img" aria-label="{escape(descricao)}">
+                {rotulos}
+                <polyline points="{linha}" />
+                {circulos}
+            </svg>
+            <figcaption>
+                <span>{escape(pontos[0]["data_coleta"][:10])}</span>
+                <span>{escape(pontos[-1]["data_coleta"][:10])}</span>
+            </figcaption>
+        </figure>
+    """
 
 
 def criar_linha_historico(coleta):
     return f"""
         <tr>
             <td>{escape(coleta["data_coleta"])}</td>
-            <td>{escape(coleta["preco_texto"])}</td>
-            <td>{escape(coleta["preco_numero"])}</td>
-            <td>{escape(coleta["status_produto"])}</td>
-            <td>{escape(coleta["mensagem"])}</td>
+            <td class="num">{escape(coleta["preco_texto"] or "Sem preco")}</td>
+            <td>{criar_selo_status(coleta["status_produto"])}</td>
+            <td class="texto-suave">{escape(coleta["mensagem"])}</td>
         </tr>
     """
 
 
-def criar_card_produto(produto_id, historico, teve_erro_na_ultima_coleta=False):
-    ultima_coleta = historico[0]
-
-    # Variacao em relacao a coleta anterior: so aparece quando o preco mudou.
-    variacao = variacao_desde_coleta_anterior(historico)
-    selo_variacao = ""
-
-    if variacao:
-        classe_variacao = "variacao-alta" if variacao > 0 else "variacao-queda"
-        selo_variacao = f'<span class="{classe_variacao}">{escape(formatar_variacao(variacao))}</span>'
-
-    # Se o produto deu erro na coleta mais recente, o preco mostrado pode estar desatualizado.
-    selo_erro = ""
-
-    if teve_erro_na_ultima_coleta:
-        selo_erro = '<span class="status status-erro">erro na ultima coleta</span>'
-
-    linhas_historico = "\n".join(criar_linha_historico(coleta) for coleta in historico)
-    status = ultima_coleta["status_produto"]
-    classe_status = "status-indisponivel" if status == "indisponivel" else "status-disponivel"
-    texto_busca = f"{produto_id} {ultima_coleta['produto_nome']} {ultima_coleta['concorrente']}".lower()
+def criar_painel_historico(produto_id, historico):
+    ultima = historico[0]
+    tabela = criar_tabela(
+        [("Data", ""), ("Preco", "num"), ("Status", ""), ("Mensagem", "")],
+        [criar_linha_historico(coleta) for coleta in historico],
+        "",
+    )
 
     return f"""
-        <details class="produto-card" data-status="{escape(status)}" data-busca="{escape(texto_busca)}">
-            <summary>
-                <div class="produto-principal">
-                    <span class="produto-id">{escape(produto_id)}</span>
-                    <span class="produto-nome">{escape(ultima_coleta["produto_nome"])}</span>
-                    <span class="data-coleta">{escape(ultima_coleta["concorrente"])}</span>
-                    <span class="data-coleta">coletado em {escape(ultima_coleta["data_coleta"])}</span>
-                </div>
-                <div class="produto-meta">
-                    <span class="preco">{escape(ultima_coleta["preco_texto"] or "Sem preco")}</span>
-                    {selo_variacao}
-                    <span class="status {classe_status}">{escape(status)}</span>
-                    {selo_erro}
-                    <a href="{escape(ultima_coleta["url"])}" target="_blank" rel="noopener noreferrer">Ver no site</a>
-                </div>
-            </summary>
+        <article class="cartao painel-historico" id="historico-{escape(produto_id)}" data-produto="{escape(produto_id)}">
+            <header class="cartao-cabecalho">
+                <h3>{escape(ultima["produto_nome"])}</h3>
+                {criar_link_site(ultima["url"])}
+            </header>
+            <p class="texto-suave">
+                {escape(produto_id)} &middot; {escape(ultima["concorrente"])} &middot;
+                coletado em {escape(ultima["data_coleta"])}
+            </p>
+            {criar_grafico_svg(historico)}
+            {tabela}
+        </article>
+    """
 
-            <div class="historico">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Data</th>
-                            <th>Preco texto</th>
-                            <th>Preco numero</th>
-                            <th>Status</th>
-                            <th>Mensagem</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {linhas_historico}
-                    </tbody>
-                </table>
-            </div>
-        </details>
+
+def criar_seletor_historico(produtos_ordenados):
+    # <select> com os produtos separados por loja (<optgroup>).
+    # Ja vem escolhido o produto com mais coletas COM PRECO: e o que tem o grafico mais
+    # interessante (um produto sempre indisponivel nao tem grafico).
+    mais_coletado = max(
+        produtos_ordenados,
+        key=lambda item: sum(1 for coleta in item[1] if coleta["preco"] is not None),
+        default=("", []),
+    )[0]
+    por_loja = defaultdict(list)
+
+    for produto_id, historico in produtos_ordenados:
+        por_loja[historico[0]["concorrente"]].append((produto_id, historico[0]["produto_nome"]))
+
+    grupos = []
+
+    for loja in sorted(por_loja):
+        opcoes = "".join(
+            f'<option value="{escape(produto_id)}"{" selected" if produto_id == mais_coletado else ""}>'
+            f'{escape(produto_id)} &middot; {escape(nome)}</option>'
+            for produto_id, nome in por_loja[loja]
+        )
+        grupos.append(f'<optgroup label="{escape(loja)}">{opcoes}</optgroup>')
+
+    return "".join(grupos)
+
+
+# ---------- Abas: Alertas e Erros ----------
+
+def criar_linha_alerta(alerta, nomes_produtos):
+    # Nome do produto a partir das coletas; se o produto nunca foi coletado, fica so o ID.
+    nome_produto = nomes_produtos.get(alerta["produto_id"], "")
+
+    return f"""
+        <tr>
+            <td>{escape(alerta["data_alerta"])}</td>
+            <td><strong>{escape(alerta["produto_id"])}</strong> {escape(nome_produto)}</td>
+            <td class="num">{escape(formatar_preco(alerta["preco_anterior"]))}</td>
+            <td class="num">{escape(formatar_preco(alerta["preco_novo"]))}</td>
+            <td class="num">{criar_selo_variacao(alerta["variacao_percentual"])}</td>
+            <td>{criar_link_site(alerta["url"])}</td>
+        </tr>
     """
 
 
@@ -284,115 +590,113 @@ def criar_linha_erro(erro):
         <tr>
             <td>{escape(erro["data_erro"])}</td>
             <td>{escape(erro["produto_id"])}</td>
-            <td>{escape(erro["tipo_erro"])}</td>
+            <td><span class="selo selo-erro">{escape(erro["tipo_erro"])}</span></td>
             <td>{escape(erro["mensagem"] or "")}</td>
-            <td><a href="{escape(erro["url"])}" target="_blank" rel="noopener noreferrer">Ver no site</a></td>
-        </tr>
-    """
-
-
-def criar_linha_alerta(alerta, nomes_produtos):
-    # Seta e cor mostram se o preco subiu ou caiu.
-    variacao = alerta["variacao_percentual"]
-    classe_variacao = "variacao-alta" if variacao > 0 else "variacao-queda"
-
-    # Nome do produto a partir das coletas; se o produto nunca foi coletado, fica so o ID.
-    nome_produto = nomes_produtos.get(alerta["produto_id"], "")
-
-    return f"""
-        <tr>
-            <td>{escape(alerta["data_alerta"])}</td>
-            <td><strong>{escape(alerta["produto_id"])}</strong> {escape(nome_produto)}</td>
-            <td>{escape(formatar_preco(alerta["preco_anterior"]))}</td>
-            <td>{escape(formatar_preco(alerta["preco_novo"]))}</td>
-            <td class="{classe_variacao}">{escape(formatar_variacao(variacao))}</td>
-            <td><a href="{escape(alerta["url"])}" target="_blank" rel="noopener noreferrer">Ver no site</a></td>
+            <td>{criar_link_site(erro["url"])}</td>
         </tr>
     """
 
 
 def criar_tabela_erros(erros, mensagem_vazia):
-    linhas = "\n".join(criar_linha_erro(erro) for erro in erros)
-
-    if linhas == "":
-        linhas = f"""
-            <tr>
-                <td colspan="5">{escape(mensagem_vazia)}</td>
-            </tr>
-        """
-
-    return f"""
-        <table>
-            <thead>
-                <tr>
-                    <th>Data</th>
-                    <th>Produto</th>
-                    <th>Tipo</th>
-                    <th>Mensagem</th>
-                    <th>Link</th>
-                </tr>
-            </thead>
-            <tbody>
-                {linhas}
-            </tbody>
-        </table>
-    """
+    return criar_tabela(
+        [("Data", ""), ("Produto", ""), ("Tipo", ""), ("Mensagem", ""), ("Link", "")],
+        [criar_linha_erro(erro) for erro in erros],
+        mensagem_vazia,
+    )
 
 
-def gerar_html(coletas, erros, alertas, ultima_execucao=None, grupos=None):
+def criar_contador(quantidade, destaque=False):
+    # Numero ao lado do nome da aba no menu. destaque=True pinta de vermelho (algo a resolver).
+    if not quantidade:
+        return ""
+
+    classe = "contador contador-destaque" if destaque else "contador"
+    return f'<span class="{classe}">{quantidade}</span>'
+
+
+# ---------- Pagina completa ----------
+
+def gerar_html(coletas, erros, alertas, ultima_execucao=None, grupos=None, categorias=None):
+    categorias = categorias or {}
     coletas_por_produto = agrupar_coletas_por_produto(coletas)
+    produtos_ordenados = sorted(
+        coletas_por_produto.items(),
+        key=lambda item: item[1][0]["produto_nome"].lower(),
+    )
 
     # Comparativo entre lojas: produtos casados pelo grupo do cadastro ou pelo EAN.
     comparativos = montar_comparativos(coletas_por_produto, grupos or {})
+
+    # Separamos os erros da ultima coleta (o que precisa de atencao agora)
+    # dos erros antigos (so para consulta; mostramos os mais recentes).
+    erros_recentes, erros_antigos = separar_erros(erros, ultima_execucao)
+    erros_antigos = erros_antigos[-LIMITE_ERROS_ANTIGOS:]
+    produtos_com_erro = {erro["produto_id"] for erro in erros_recentes}
+
+    # --- Comparador ---
     cards_comparativos = "\n".join(
-        criar_card_comparativo(chave, ultimas_coletas)
+        criar_card_comparativo(
+            chave,
+            ultimas_coletas,
+            # Categoria do comparativo: a do primeiro produto do grupo que tiver categoria.
+            next((categorias[c["produto_id"]] for c in ultimas_coletas if c["produto_id"] in categorias), ""),
+        )
         for chave, ultimas_coletas in comparativos.items()
     )
 
     if cards_comparativos == "":
         cards_comparativos = """
-            <p class="subtitulo">Nenhum produto casado entre lojas ainda (mesmo EAN ou mesmo grupo).</p>
+            <p class="vazio">Nenhum produto casado entre lojas ainda (mesmo EAN ou mesmo grupo).</p>
         """
 
-    # Separamos os erros da ultima coleta (o que precisa de atencao agora)
-    # dos erros antigos (so para consulta; mostramos os 20 mais recentes).
-    erros_recentes, erros_antigos = separar_erros(erros, ultima_execucao)
-    erros_antigos = erros_antigos[-20:]
-    produtos_com_erro = {erro["produto_id"] for erro in erros_recentes}
-
-    produtos_ordenados = sorted(
-        coletas_por_produto.items(),
-        key=lambda item: item[1][0]["produto_nome"].lower(),
-    )
-    cards_produtos = "\n".join(
-        criar_card_produto(produto_id, historico, produto_id in produtos_com_erro)
+    # --- Produtos ---
+    linhas_produtos = [
+        criar_linha_produto(
+            produto_id, historico, categorias.get(produto_id, ""), produto_id in produtos_com_erro
+        )
         for produto_id, historico in produtos_ordenados
+    ]
+    tabela_produtos = criar_tabela(
+        [("ID", ""), ("Produto", ""), ("Loja", ""), ("Categoria", ""), ("Preco", "num"),
+         ("Variacao", "num"), ("Status", ""), ("Coletado em", ""), ("Link", "")],
+        linhas_produtos,
+        "Nenhum produto coletado ainda.",
+        id_tabela="tabelaProdutos",
     )
-    tabela_erros_recentes = criar_tabela_erros(erros_recentes, "Nenhum erro na ultima coleta.")
-    tabela_erros_antigos = criar_tabela_erros(list(reversed(erros_antigos)), "Nenhum erro anterior.")
-    resumo_execucao = criar_resumo_execucao(ultima_execucao)
-    data_geracao = agora()
-    estilo = ler_arquivo_modelo(ARQUIVO_ESTILO)
-    script = ler_arquivo_modelo(ARQUIVO_SCRIPT)
+    lojas = {historico[0]["concorrente"] for historico in coletas_por_produto.values()}
+    categorias_usadas = {categorias[p] for p in coletas_por_produto if p in categorias}
 
+    # --- Historico ---
+    paineis_historico = "\n".join(
+        criar_painel_historico(produto_id, historico) for produto_id, historico in produtos_ordenados
+    )
+
+    if paineis_historico == "":
+        paineis_historico = '<p class="vazio">Nenhum produto coletado ainda.</p>'
+
+    # --- Alertas ---
     # Dicionario produto_id -> nome da ultima coleta, usado na tabela de alertas.
     nomes_produtos = {
         produto_id: historico[0]["produto_nome"]
         for produto_id, historico in coletas_por_produto.items()
     }
-
-    # Ultimos 20 alertas, do mais recente para o mais antigo.
-    # alertas[-20:] pega os 20 ultimos; reversed() inverte a ordem.
-    linhas_alertas = "\n".join(
-        criar_linha_alerta(alerta, nomes_produtos) for alerta in reversed(alertas[-20:])
+    # Ultimos alertas, do mais recente para o mais antigo.
+    # alertas[-N:] pega os N ultimos; reversed() inverte a ordem.
+    tabela_alertas = criar_tabela(
+        [("Data", ""), ("Produto", ""), ("Preco anterior", "num"), ("Preco novo", "num"),
+         ("Variacao", "num"), ("Link", "")],
+        [criar_linha_alerta(alerta, nomes_produtos) for alerta in reversed(alertas[-LIMITE_ALERTAS:])],
+        "Nenhum alerta de variacao de preco.",
     )
 
-    if linhas_alertas == "":
-        linhas_alertas = """
-            <tr>
-                <td colspan="6">Nenhum alerta de variacao de preco.</td>
-            </tr>
-        """
+    # --- Erros ---
+    tabela_erros_recentes = criar_tabela_erros(erros_recentes, "Nenhum erro na ultima coleta.")
+    tabela_erros_antigos = criar_tabela_erros(list(reversed(erros_antigos)), "Nenhum erro anterior.")
+
+    resumo_execucao = criar_resumo_execucao(ultima_execucao)
+    data_geracao = agora()
+    estilo = ler_arquivo_modelo(ARQUIVO_ESTILO)
+    script = ler_arquivo_modelo(ARQUIVO_SCRIPT)
 
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -400,100 +704,132 @@ def gerar_html(coletas, erros, alertas, ultima_execucao=None, grupos=None):
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Monitor de Precos</title>
+    <!-- Marca que o JavaScript esta ligado. Sem JS, todas as abas aparecem uma embaixo da outra. -->
+    <script>document.documentElement.classList.add("js");</script>
     <style>
 {estilo}
     </style>
 </head>
 <body>
-    <main>
-        <header>
-            <div>
-                <h1>Monitor de Precos</h1>
-                <p class="subtitulo">Relatorio gerado em {escape(data_geracao)}</p>
-                <p class="subtitulo">{escape(resumo_execucao)}</p>
-            </div>
-        </header>
+    <div class="layout">
+        <nav class="menu" aria-label="Secoes do relatorio">
+            <p class="menu-titulo">Monitor de Precos</p>
+            <a href="#visao-geral" data-aba="visao-geral">Visao geral</a>
+            <a href="#comparador" data-aba="comparador">Comparador {criar_contador(len(comparativos))}</a>
+            <a href="#produtos" data-aba="produtos">Produtos {criar_contador(len(coletas_por_produto))}</a>
+            <a href="#historico" data-aba="historico">Historico</a>
+            <a href="#alertas" data-aba="alertas">Alertas {criar_contador(len(alertas))}</a>
+            <a href="#erros" data-aba="erros">Erros {criar_contador(len(erros_recentes), destaque=True)}</a>
+        </nav>
 
-        <section class="resumo">
-            <div class="indicador">
-                <strong>{len(coletas_por_produto)}</strong>
-                <span>produtos com coleta</span>
-            </div>
-            <div class="indicador">
-                <strong>{len(coletas)}</strong>
-                <span>coletas no historico</span>
-            </div>
-            <div class="indicador">
-                <strong>{len(erros)}</strong>
-                <span>erros registrados</span>
-            </div>
-            <div class="indicador">
-                <strong>{len(alertas)}</strong>
-                <span>alertas de preco</span>
-            </div>
-        </section>
+        <main class="conteudo">
+            <header class="topo">
+                <p class="topo-coleta">{escape(resumo_execucao)}</p>
+                <p class="texto-suave">Relatorio gerado em {escape(data_geracao)}</p>
+            </header>
 
-        <section class="secao-alertas">
-            <h2>Alertas de Variacao de Preco</h2>
-            <p class="subtitulo">
-                Precos que variaram mais de 50% em relacao a ultima coleta. Eles nao entram no
-                historico; se o mesmo preco aparecer na coleta seguinte, e confirmado e salvo.
-            </p>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Data</th>
-                        <th>Produto</th>
-                        <th>Preco anterior</th>
-                        <th>Preco novo</th>
-                        <th>Variacao</th>
-                        <th>Link</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {linhas_alertas}
-                </tbody>
-            </table>
-        </section>
-
-        <section class="secao-comparativo">
-            <h2>Comparativo entre Lojas</h2>
-            <p class="subtitulo">
-                Ultimo preco de cada loja para o mesmo produto (mesmo EAN) ou para produtos
-                equivalentes (mesmo grupo no produtos.csv).
-            </p>
-            {cards_comparativos}
-        </section>
-
-        <section>
-            <h2>Produtos</h2>
-            <p class="subtitulo">Clique em um produto para abrir o historico de precos.</p>
-            <div class="controles">
-                <input class="busca" id="buscaProduto" type="search" placeholder="Buscar por produto, ID ou concorrente">
-                <div class="filtros" aria-label="Filtro de status">
-                    <button class="filtro-status ativo" type="button" data-status="todos">Todos</button>
-                    <button class="filtro-status" type="button" data-status="disponivel">Disponiveis</button>
-                    <button class="filtro-status" type="button" data-status="indisponivel">Indisponiveis</button>
+            <section class="aba" id="aba-visao-geral" aria-labelledby="titulo-visao-geral">
+                <h1 id="titulo-visao-geral">Visao geral</h1>
+                <div class="indicadores">
+                    {criar_indicador(len(coletas_por_produto), "produtos com coleta")}
+                    {criar_indicador(len(comparativos), "comparacoes entre lojas")}
+                    {criar_indicador(len(alertas), "alertas de preco")}
+                    {criar_indicador(len(erros_recentes), "erros na ultima coleta", "alerta" if erros_recentes else "")}
                 </div>
-            </div>
-            <p class="contador-filtro" id="contadorFiltro"></p>
-            {cards_produtos}
-        </section>
 
-        <section class="secao-erros">
-            <h2>Erros da Ultima Coleta</h2>
-            <p class="subtitulo">
-                Produtos com erro na coleta mais recente mostram o ultimo preco que deu certo,
-                marcado com "erro na ultima coleta".
-            </p>
-            {tabela_erros_recentes}
+                <h2>Maiores diferencas entre lojas</h2>
+                <p class="texto-suave">
+                    Onde o mesmo produto (ou um equivalente) tem a maior diferenca de preco entre as
+                    lojas, comparando a opcao mais barata de cada loja.
+                </p>
+                {criar_maiores_diferencas(comparativos)}
 
-            <details class="erros-antigos">
-                <summary>Erros anteriores ({len(erros_antigos)} mais recentes)</summary>
-                {tabela_erros_antigos}
-            </details>
-        </section>
-    </main>
+                <h2>Precos que mudaram</h2>
+                <p class="texto-suave">Variacao desde a coleta anterior de cada produto.</p>
+                {criar_variacoes_recentes(coletas_por_produto)}
+            </section>
+
+            <section class="aba" id="aba-comparador" aria-labelledby="titulo-comparador">
+                <h1 id="titulo-comparador">Comparativo entre Lojas</h1>
+                <p class="texto-suave">
+                    Ultimo preco de cada loja para o mesmo produto (mesmo EAN) ou para produtos
+                    equivalentes (mesmo grupo no produtos.csv), do mais barato para o mais caro.
+                </p>
+                <div class="controles">
+                    <label>Categoria
+                        <select id="filtroCategoriaComparador">{criar_opcoes(categorias_usadas, "Todas")}</select>
+                    </label>
+                    <label>Ordenar por
+                        <select id="ordemComparador">
+                            <option value="diferenca">Maior diferenca</option>
+                            <option value="nome">Nome do grupo</option>
+                        </select>
+                    </label>
+                </div>
+                <div id="listaComparativos">
+                    {cards_comparativos}
+                </div>
+            </section>
+
+            <section class="aba" id="aba-produtos" aria-labelledby="titulo-produtos">
+                <h1 id="titulo-produtos">Produtos pesquisados</h1>
+                <p class="texto-suave">Clique no nome para ver o historico. Clique no titulo de uma coluna para ordenar.</p>
+                <div class="controles">
+                    <label class="controle-busca">Buscar
+                        <input id="buscaProduto" type="search" placeholder="Produto, ID, loja ou categoria">
+                    </label>
+                    <label>Loja
+                        <select id="filtroLoja">{criar_opcoes(lojas, "Todas")}</select>
+                    </label>
+                    <label>Categoria
+                        <select id="filtroCategoria">{criar_opcoes(categorias_usadas, "Todas")}</select>
+                    </label>
+                    <label>Status
+                        <select id="filtroStatus">
+                            <option value="">Todos</option>
+                            <option value="disponivel">Disponiveis</option>
+                            <option value="indisponivel">Indisponiveis</option>
+                        </select>
+                    </label>
+                </div>
+                <p class="texto-suave" id="contadorProdutos" aria-live="polite"></p>
+                {tabela_produtos}
+            </section>
+
+            <section class="aba" id="aba-historico" aria-labelledby="titulo-historico">
+                <h1 id="titulo-historico">Historico de precos</h1>
+                <div class="controles">
+                    <label class="controle-busca">Produto
+                        <select id="seletorHistorico">{criar_seletor_historico(produtos_ordenados)}</select>
+                    </label>
+                </div>
+                {paineis_historico}
+            </section>
+
+            <section class="aba" id="aba-alertas" aria-labelledby="titulo-alertas">
+                <h1 id="titulo-alertas">Alertas de Variacao de Preco</h1>
+                <p class="texto-suave">
+                    Precos que variaram mais de 50% em relacao a ultima coleta. Eles nao entram no
+                    historico; se o mesmo preco aparecer na coleta seguinte, e confirmado e salvo.
+                </p>
+                {tabela_alertas}
+            </section>
+
+            <section class="aba" id="aba-erros" aria-labelledby="titulo-erros">
+                <h1 id="titulo-erros">Erros da Ultima Coleta</h1>
+                <p class="texto-suave">
+                    Produtos com erro na coleta mais recente mostram o ultimo preco que deu certo,
+                    marcado com "erro na ultima coleta".
+                </p>
+                {tabela_erros_recentes}
+
+                <details class="erros-antigos">
+                    <summary>Erros anteriores ({len(erros_antigos)} mais recentes)</summary>
+                    {tabela_erros_antigos}
+                </details>
+            </section>
+        </main>
+    </div>
     <script>
 {script}
     </script>
@@ -514,11 +850,15 @@ def main():
     finally:
         conexao.close()
 
-    # Os grupos de equivalencia vem do cadastro. Sem produtos.csv, o comparativo usa so o EAN.
+    # Grupos de equivalencia e categorias vem do cadastro.
+    # Sem produtos.csv, o comparativo usa so o EAN e os filtros de categoria ficam vazios.
     cadastro = ler_cadastro() if ARQUIVO_PRODUTOS.exists() else []
-    grupos = ler_grupos(cadastro)
 
-    html = gerar_html(coletas, erros, alertas, ultima_execucao, grupos)
+    html = gerar_html(
+        coletas, erros, alertas, ultima_execucao,
+        grupos=ler_grupos(cadastro),
+        categorias=ler_categorias(cadastro),
+    )
 
     ARQUIVO_RELATORIO.parent.mkdir(exist_ok=True)
 

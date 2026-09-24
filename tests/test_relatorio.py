@@ -1,7 +1,10 @@
 # Testes do relatorio HTML (gerar_relatorio.py).
 # Montamos os dados na mao, no mesmo formato que o banco devolve,
 # e conferimos se o HTML gerado contem o que esperamos.
-from gerar_relatorio import gerar_html, ler_grupos, montar_comparativos, agrupar_coletas_por_produto, preparar_coleta
+from gerar_relatorio import (
+    agrupar_coletas_por_produto, criar_grafico_svg, criar_seletor_historico, diferenca_entre_lojas,
+    gerar_html, ler_categorias, ler_grupos, montar_comparativos, preparar_coleta,
+)
 
 
 def criar_coleta(produto_id, preco, data_coleta, nome="Telha teste", concorrente="Loja A", ean=None):
@@ -213,7 +216,7 @@ def test_relatorio_mostra_comparativo_com_mais_barato_e_diferenca():
     assert "Comparativo entre Lojas" in html
     assert "TELHA-6MM" in html
     assert "mais barato" in html
-    assert "O mais caro custa 20,0% a mais que o mais barato." in html
+    assert "A loja mais cara cobra 20,0% a mais que a mais barata." in html
     # Ordem: mais barato primeiro, indisponivel por ultimo.
     assert html.index("PRD-101</strong>") < html.index("PRD-001</strong>") < html.index("PRD-201</strong>")
 
@@ -232,3 +235,92 @@ def test_css_e_js_vao_para_dentro_do_html():
     assert "<link" not in html and "<script src" not in html
     assert "font-family" in html               # veio do estilo.css
     assert "addEventListener" in html          # veio do interacao.js
+
+
+# ---------- Layout com abas ----------
+
+def test_diferenca_compara_lojas_e_nao_produtos_da_mesma_loja():
+    # A Loja A tem duas marcas no grupo (50 e 70). Comparando lojas, vale a opcao mais
+    # barata de cada uma: Loja A 50 x Loja B 55 = 10%, e nao 70 x 50 = 40%.
+    ultimas = [
+        criar_coleta("PRD-001", 70.0, "2026-09-24 09:00:00", concorrente="Loja A"),
+        criar_coleta("PRD-002", 50.0, "2026-09-24 09:00:00", concorrente="Loja A"),
+        criar_coleta("PRD-101", 55.0, "2026-09-24 09:00:00", concorrente="Loja B"),
+    ]
+
+    assert round(diferenca_entre_lojas(ultimas), 1) == 10.0
+
+
+def test_diferenca_precisa_de_duas_lojas_com_preco():
+    ultimas = [
+        criar_coleta("PRD-001", 50.0, "2026-09-24 09:00:00", concorrente="Loja A"),
+        criar_coleta("PRD-101", None, "2026-09-24 09:00:00", concorrente="Loja B"),
+    ]
+
+    assert diferenca_entre_lojas(ultimas) is None
+
+
+def test_grafico_ignora_coletas_sem_preco():
+    historico = [   # do mais recente para o mais antigo, como no relatorio
+        criar_coleta("PRD-001", 66.9, "2026-09-24 09:00:00"),
+        criar_coleta("PRD-001", None, "2026-09-23 09:00:00"),
+        criar_coleta("PRD-001", 61.9, "2026-09-22 09:00:00"),
+        criar_coleta("PRD-001", 64.9, "2026-09-21 09:00:00"),
+    ]
+
+    svg = criar_grafico_svg(historico)
+
+    assert svg.count("<circle") == 3          # um ponto por coleta com preco
+    assert "maior: R$66,90" in svg and "menor: R$61,90" in svg
+
+
+def test_grafico_com_preco_estavel_e_com_poucos_dados():
+    estavel = [criar_coleta("PRD-001", 10.0, f"2026-09-2{dia} 09:00:00") for dia in (4, 3)]
+    uma_coleta = [criar_coleta("PRD-001", 10.0, "2026-09-24 09:00:00")]
+
+    assert "preco estavel: R$10,00" in criar_grafico_svg(estavel)
+    assert "<svg" not in criar_grafico_svg(uma_coleta)
+
+
+def test_historico_abre_no_produto_com_mais_coletas_com_preco():
+    produtos = [
+        ("PRD-001", [criar_coleta("PRD-001", None, f"2026-09-2{dia} 09:00:00") for dia in (4, 3, 2)]),
+        ("PRD-002", [criar_coleta("PRD-002", 10.0, f"2026-09-2{dia} 09:00:00") for dia in (4, 3)]),
+    ]
+
+    seletor = criar_seletor_historico(produtos)
+
+    assert '<option value="PRD-002" selected>' in seletor
+    assert '<option value="PRD-001">' in seletor
+
+
+def test_menu_tem_as_abas_e_contador_de_erros_em_destaque():
+    coletas = [criar_coleta("PRD-022", 50.0, "2026-09-24 11:48:00")]
+    erros = [criar_erro("PRD-022", "2026-09-24 11:49:02")]
+
+    html = gerar_html(coletas, erros, [], EXECUCAO)
+
+    for aba in ["visao-geral", "comparador", "produtos", "historico", "alertas", "erros"]:
+        assert f'href="#{aba}"' in html
+        # id diferente do endereco, para o navegador nao rolar a pagina sozinho
+        assert f'id="aba-{aba}"' in html
+    assert '<span class="contador contador-destaque">1</span>' in html
+
+
+def test_filtros_de_loja_e_categoria_usam_os_valores_coletados():
+    coletas = [
+        criar_coleta("PRD-001", 10.0, "2026-09-24 09:00:00", concorrente="Loja A"),
+        criar_coleta("PRD-101", 12.0, "2026-09-24 09:00:00", concorrente="Loja B"),
+    ]
+    categorias = ler_categorias([
+        {"produto_id": "PRD-001", "categoria": "telha"},
+        {"produto_id": "PRD-101", "categoria": " cimento "},
+        {"produto_id": "PRD-999", "categoria": ""},
+    ])
+
+    html = gerar_html(coletas, [], [], categorias=categorias)
+
+    assert categorias == {"PRD-001": "telha", "PRD-101": "cimento"}
+    assert '<option value="Loja B">Loja B</option>' in html
+    assert '<option value="cimento">cimento</option>' in html
+    assert 'data-categoria="telha"' in html
