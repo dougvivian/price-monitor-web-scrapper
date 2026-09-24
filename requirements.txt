@@ -1,2 +1,5 @@
 requests==2.32.4
 beautifulsoup4==4.13.4
+
+# Usado apenas para rodar os testes automatizados
+pytest==9.1.1

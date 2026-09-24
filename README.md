@@ -36,6 +36,14 @@ python src/gerar_relatorio.py
 
 Depois, abra `relatorios/relatorio.html` no navegador.
 
+### Testes
+
+```bash
+python -m pytest
+```
+
+Os testes usam paginas HTML salvas em `tests/paginas/` e nao acessam a internet.
+
 ## Estrutura
 
 ```text
@@ -48,6 +56,9 @@ dados/
   erros.csv            falhas de coleta
 relatorios/
   relatorio.html       relatorio gerado
+tests/
+  test_extracao.py     testes automatizados da extracao
+  paginas/             paginas HTML salvas usadas nos testes
 aprendizado.md         diario do desenvolvimento e conceitos aprendidos
 ```
 
@@ -68,7 +79,7 @@ aprendizado.md         diario do desenvolvimento e conceitos aprendidos
 - **v1 (em andamento):** 1 site, 10 produtos, execucao manual.
   - [x] Coleta com tratamento de erros e historico em CSV
   - [x] Relatorio HTML
-  - [ ] Testes automatizados com paginas HTML salvas (sem acessar o site)
+  - [x] Testes automatizados com paginas HTML salvas (sem acessar o site)
   - [ ] Extracao via dados estruturados da pagina (JSON-LD / schema.org)
   - [ ] Validacao dos dados (preco vazio ou variacao absurda gera alerta)
   - [ ] Historico em SQLite

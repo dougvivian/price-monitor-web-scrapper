@@ -4,3 +4,4 @@ __pycache__/
 # Configuracoes pessoais do Claude Code (nao vao para o GitHub)
 .claude/settings.local.json
 CLAUDE.local.md
+.pytest_cache/
