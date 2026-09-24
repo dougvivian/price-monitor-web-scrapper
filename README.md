@@ -253,8 +253,9 @@ dados fictícios.
   robots.txt; nesses casos a regra é tratada como texto comum.
 - Em lojas Shopify, produtos com várias variações (`?variant=`) ainda não são tratados:
   o monitor registra "SKU ambíguo".
-- A coleta agendada depende do computador ligado (se estiver desligado às 9h, roda
-  assim que for ligado).
+- A coleta agendada depende do computador ligado. No Agendador de Tarefas, a opção
+  "executar assim que possível após perder um horário agendado" faz a coleta rodar
+  quando o computador for ligado.
 
 ## Roadmap
 
