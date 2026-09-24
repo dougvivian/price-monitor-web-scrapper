@@ -30,19 +30,62 @@ ESPERA_NOVA_TENTATIVA = 5
 DISPONIVEL_SCHEMA = "InStock"
 
 
-def ler_produtos():
-    produtos = []
-
-    # Lemos o cadastro de produtos que queremos monitorar.
+def ler_cadastro():
+    # Le todas as linhas do cadastro de produtos (ativas ou nao).
     with open(ARQUIVO_PRODUTOS, "r", newline="", encoding="utf-8") as arquivo_csv:
-        leitor_csv = csv.DictReader(arquivo_csv, delimiter=";")
+        return list(csv.DictReader(arquivo_csv, delimiter=";"))
 
-        for produto in leitor_csv:
-            # Por enquanto, coletamos apenas produtos marcados como ativos.
-            if produto["ativo"].lower() == "sim":
-                produtos.append(produto)
 
-    return produtos
+def validar_cadastro(linhas):
+    # Confere o cadastro ANTES de coletar e devolve uma lista de avisos (texto).
+    # Um erro de digitacao no Excel (ID repetido, coluna apagada, "Sim " com espaco...)
+    # apareceria so no meio da coleta, ou nem apareceria. Assim ele aparece logo no inicio.
+    avisos = []
+
+    if not linhas:
+        return ["O cadastro de produtos esta vazio."]
+
+    # Colunas obrigatorias: se faltar alguma, nem da para conferir o resto.
+    colunas_obrigatorias = ["produto_id", "concorrente", "url", "ativo"]
+    colunas_faltando = [coluna for coluna in colunas_obrigatorias if coluna not in linhas[0]]
+
+    if colunas_faltando:
+        return [f"Colunas obrigatorias faltando no cadastro: {', '.join(colunas_faltando)}"]
+
+    # Um set guarda valores sem repeticao; usamos para achar IDs repetidos.
+    ids_vistos = set()
+
+    # enumerate(..., start=2): a linha 1 do arquivo e o cabecalho, entao os dados comecam na 2.
+    for numero_linha, linha in enumerate(linhas, start=2):
+        produto_id = (linha["produto_id"] or "").strip()
+        ativo = (linha["ativo"] or "").strip().lower()
+        url = (linha["url"] or "").strip()
+
+        if produto_id == "":
+            avisos.append(f"Linha {numero_linha}: produto sem produto_id.")
+        elif produto_id in ids_vistos:
+            avisos.append(f"Linha {numero_linha}: produto_id repetido ({produto_id}).")
+        else:
+            ids_vistos.add(produto_id)
+
+        if ativo not in ("sim", "nao"):
+            avisos.append(f"Linha {numero_linha}: ativo deve ser 'sim' ou 'nao' (veio '{linha['ativo']}').")
+
+        if not url.startswith(("http://", "https://")):
+            avisos.append(f"Linha {numero_linha}: url invalida ({url or 'vazia'}).")
+
+    return avisos
+
+
+def filtrar_ativos(linhas):
+    # So coletamos os produtos marcados como ativos.
+    # strip() e lower() aceitam variacoes como "Sim" ou "sim " digitadas no Excel.
+    return [linha for linha in linhas if (linha["ativo"] or "").strip().lower() == "sim"]
+
+
+def ler_produtos():
+    # Atalho usado em outros pontos do projeto: le o cadastro e devolve so os ativos.
+    return filtrar_ativos(ler_cadastro())
 
 
 def ler_json_ld_produto(soup):
@@ -387,7 +430,13 @@ def main():
         print("Copie dados/produtos.exemplo.csv para dados/produtos.csv e preencha com os seus produtos.")
         return
 
-    produtos = ler_produtos()
+    cadastro = ler_cadastro()
+
+    # Os avisos nao interrompem a coleta: so ficam visiveis no terminal/log para corrigir.
+    for aviso in validar_cadastro(cadastro):
+        print("AVISO no cadastro:", aviso)
+
+    produtos = filtrar_ativos(cadastro)
     conexao = banco.conectar(ARQUIVO_BANCO)
 
     # Contador de resultados para o resumo final: {"coletado": 50, "erro": 3, ...}
