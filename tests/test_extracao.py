@@ -4,6 +4,7 @@
 # Assim os testes sao rapidos, funcionam sem internet e sempre dao o mesmo resultado.
 #
 # Para rodar:  python -m pytest
+import json
 from pathlib import Path
 
 import pytest
@@ -20,12 +21,13 @@ def ler_pagina(nome_arquivo):
     return caminho.read_text(encoding="utf-8")
 
 
-def criar_produto(url="https://exemplo.com/produto/p"):
+def criar_produto(url="https://exemplo.com/produto/p", sku=""):
     # Monta um produto no mesmo formato de uma linha do dados/produtos.csv.
     return {
         "produto_id": "TESTE-001",
         "concorrente": "Loja A",
         "url": url,
+        "sku": sku,
     }
 
 
@@ -33,18 +35,61 @@ def criar_produto(url="https://exemplo.com/produto/p"):
 # Testes com paginas reais salvas
 # ---------------------------------------------------------------------------
 
-def test_produto_disponivel_retorna_preco_e_status():
-    html = ler_pagina("produto_disponivel.html")
+def test_variacao_usa_preco_do_sku_da_url():
+    # Pagina baixada com ?skuId=10000103. O JSON-LD tem 6 ofertas (uma por tamanho);
+    # a do SKU 10000103 custa R$87,90. O metodo antigo (seletor CSS) devolvia R$61,90,
+    # que era o preco de outra variacao.
+    html = ler_pagina("produto_variacao_sku.html")
+    url = "https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm-cinza-Marca/p?skuId=10000103"
 
-    dados = extrair_dados_produto(html, criar_produto())
+    dados = extrair_dados_produto(html, criar_produto(url=url))
 
     assert dados["status_produto"] == "disponivel"
-    assert dados["preco_texto"] == "R$26,90/un"
-    assert dados["preco_numero"] == 26.9
-    assert dados["produto_nome"].startswith("Telha de Fibrocimento Ondulada Marca Marca")
+    assert dados["preco_numero"] == 87.9
+    assert dados["preco_texto"] == "R$87,90"
+    assert dados["produto_nome"] == "Telha Fibrocimento Ondulada 6mm Cinza Marca"
 
 
-def test_produto_indisponivel_retorna_status_e_mensagem_sem_preco():
+def test_sku_da_coluna_tem_prioridade_sobre_o_link():
+    # Se a coluna sku estiver preenchida, ela vale mais que o ?skuId= do link.
+    html = ler_pagina("produto_variacao_sku.html")
+    url = "https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm-cinza-Marca/p?skuId=10000103"
+
+    dados = extrair_dados_produto(html, criar_produto(url=url, sku="10000101"))
+
+    assert dados["preco_numero"] == 61.9
+
+
+def test_varias_ofertas_sem_sku_gera_erro_de_sku_ambiguo():
+    # Esta pagina tem 2 ofertas (R$26,90 e R$25,90) e o link nao tem ?skuId=.
+    # Em vez de adivinhar, a funcao deve avisar que falta informar o SKU.
+    html = ler_pagina("produto_disponivel.html")
+
+    with pytest.raises(ValueError, match="SKU ambiguo"):
+        extrair_dados_produto(html, criar_produto())
+
+
+def test_varias_ofertas_com_sku_na_coluna():
+    html = ler_pagina("produto_disponivel.html")
+
+    dados = extrair_dados_produto(html, criar_produto(sku="20000202"))
+
+    assert dados["status_produto"] == "disponivel"
+    assert dados["preco_numero"] == 25.9
+    assert dados["produto_nome"] == "Telha de Fibrocimento Ondulada Marca Marca Cinza 4mm"
+
+
+def test_sku_inexistente_gera_erro():
+    html = ler_pagina("produto_disponivel.html")
+
+    with pytest.raises(ValueError, match="SKU 123 nao encontrado"):
+        extrair_dados_produto(html, criar_produto(sku="123"))
+
+
+def test_produto_fora_de_estoque_fica_indisponivel_sem_preco():
+    # O JSON-LD informa preco (R$229,90), mas com availability OutOfStock.
+    # O produto deve ficar indisponivel, sem preco nas colunas de preco,
+    # e o preco anunciado deve aparecer so na mensagem.
     html = ler_pagina("produto_indisponivel.html")
 
     dados = extrair_dados_produto(html, criar_produto())
@@ -52,12 +97,21 @@ def test_produto_indisponivel_retorna_status_e_mensagem_sem_preco():
     assert dados["status_produto"] == "indisponivel"
     assert dados["preco_texto"] == ""
     assert dados["preco_numero"] == ""
-    assert "não está disponível" in dados["mensagem"]
+    assert dados["mensagem"] == "OutOfStock (preco anunciado: R$229,90)"
+
+
+def test_sku_com_zero_a_esquerda():
+    # No JSON-LD o SKU aparece como "03000301"; quem cadastra pode digitar "3000301".
+    html = ler_pagina("produto_indisponivel.html")
+
+    dados = extrair_dados_produto(html, criar_produto(sku="3000301"))
+
+    assert dados["status_produto"] == "indisponivel"
 
 
 def test_dados_de_identificacao_vem_do_cadastro():
     # produto_id, concorrente e url devem vir do cadastro (produtos.csv), nao da pagina.
-    html = ler_pagina("produto_disponivel.html")
+    html = ler_pagina("produto_indisponivel.html")
     produto = criar_produto(url="https://www.loja-exemplo.com.br/qualquer/p")
 
     dados = extrair_dados_produto(html, produto)
@@ -67,79 +121,91 @@ def test_dados_de_identificacao_vem_do_cadastro():
     assert dados["url"] == "https://www.loja-exemplo.com.br/qualquer/p"
 
 
-# BUG CONHECIDO: esta pagina foi baixada com ?skuId=10000103 (telha de 1,83m).
-# O JSON-LD da propria pagina diz que esse SKU custa R$87,90, mas o seletor CSS
-# pega o preco da variacao padrao da pagina (SKU 10000101, R$61,90).
-# O "xfail" avisa o pytest que ESPERAMOS que este teste falhe por enquanto.
-# O "strict=True" faz o pytest reclamar quando o bug for corrigido,
-# lembrando de tirar esta marcacao.
-@pytest.mark.xfail(strict=True, reason="seletor CSS ignora o skuId da URL; corrigir com JSON-LD")
-def test_variacao_usa_preco_do_sku_da_url():
-    html = ler_pagina("produto_variacao_sku.html")
-    url = "https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm-cinza-Marca/p?skuId=10000103"
-
-    dados = extrair_dados_produto(html, criar_produto(url=url))
-
-    assert dados["preco_numero"] == 87.9
-
-
 # ---------------------------------------------------------------------------
 # Testes com pequenos trechos de HTML
-# Usamos as mesmas classes CSS da Loja A, mas so com o minimo necessario.
+# Montamos so o minimo necessario: um bloco JSON-LD dentro de uma pagina vazia.
 # ---------------------------------------------------------------------------
 
-def montar_html(titulo=None, preco=None, aviso_indisponivel=None):
-    # Monta um HTML minimo com os elementos que a funcao procura.
-    partes = ["<html><body>"]
-
-    if titulo is not None:
-        partes.append(f'<h1 class="vtex-store-components-3-x-productNameContainer">{titulo}</h1>')
-
-    if preco is not None:
-        partes.append(f'<span class="vtex-product-price-1-x-sellingPrice">{preco}</span>')
-
-    if aviso_indisponivel is not None:
-        partes.append(f'<p class="vtex-availability-notify-1-x-title">{aviso_indisponivel}</p>')
-
-    partes.append("</body></html>")
-    return "".join(partes)
+def montar_html(json_ld):
+    # json.dumps faz o caminho inverso do json.loads: transforma o dicionario em texto JSON.
+    texto_json = json.dumps(json_ld)
+    return f'<html><head><script type="application/ld+json">{texto_json}</script></head></html>'
 
 
-# O parametrize roda o mesmo teste varias vezes, uma para cada par (texto, numero esperado).
-@pytest.mark.parametrize(
-    "preco_texto, preco_esperado",
-    [
-        ("R$61,90/un", 61.9),
-        ("R$56,90/m²", 56.9),
-        ("R$ 1.234,56", 1234.56),
-        ("R$869,90", 869.9),
-    ],
-)
-def test_limpeza_do_preco(preco_texto, preco_esperado):
-    html = montar_html(titulo="Produto teste", preco=preco_texto)
+def montar_produto_json(ofertas, nome="Produto teste"):
+    return {"@type": "Product", "name": nome, "offers": ofertas}
+
+
+def test_oferta_unica_sem_aggregate_offer():
+    # Nem todo site usa AggregateOffer; aqui "offers" e uma oferta so.
+    html = montar_html(montar_produto_json(
+        {"@type": "Offer", "price": 10.5, "availability": "https://schema.org/InStock"}
+    ))
 
     dados = extrair_dados_produto(html, criar_produto())
 
-    assert dados["preco_numero"] == preco_esperado
+    assert dados["preco_numero"] == 10.5
+    assert dados["preco_texto"] == "R$10,50"
 
 
-def test_sem_titulo_gera_erro():
-    html = montar_html(preco="R$10,00")
+def test_preco_como_texto():
+    # Alguns sites mandam o preco como texto ("1234.56") em vez de numero.
+    html = montar_html(montar_produto_json(
+        {"@type": "Offer", "price": "1234.56", "availability": "http://schema.org/InStock"}
+    ))
+
+    dados = extrair_dados_produto(html, criar_produto())
+
+    assert dados["preco_numero"] == 1234.56
+
+
+def test_pagina_sem_json_ld_gera_erro():
+    html = "<html><body><h1>Produto</h1></body></html>"
 
     # pytest.raises confere que a funcao realmente levanta o erro esperado.
-    with pytest.raises(ValueError, match="Titulo nao encontrado"):
+    with pytest.raises(ValueError, match="JSON-LD do produto nao encontrado"):
         extrair_dados_produto(html, criar_produto())
 
 
-def test_sem_preco_e_sem_aviso_de_indisponivel_gera_erro():
-    html = montar_html(titulo="Produto teste")
+def test_json_ld_mal_formatado_e_ignorado():
+    # Um bloco quebrado nao deve impedir de ler o proximo bloco, que esta correto.
+    bloco_quebrado = '<script type="application/ld+json">{ isto nao e json </script>'
+    html_valido = montar_html(montar_produto_json(
+        {"@type": "Offer", "price": 5, "availability": "http://schema.org/InStock"}
+    ))
+    html = html_valido.replace("<head>", "<head>" + bloco_quebrado)
+
+    dados = extrair_dados_produto(html, criar_produto())
+
+    assert dados["preco_numero"] == 5
+
+
+def test_em_estoque_sem_preco_gera_erro():
+    html = montar_html(montar_produto_json(
+        {"@type": "Offer", "availability": "http://schema.org/InStock"}
+    ))
 
     with pytest.raises(ValueError, match="Preco nao encontrado"):
         extrair_dados_produto(html, criar_produto())
 
 
-def test_preco_sem_numeros_gera_erro():
-    html = montar_html(titulo="Produto teste", preco="Consulte")
+def test_preco_zero_gera_erro():
+    html = montar_html(montar_produto_json(
+        {"@type": "Offer", "price": 0, "availability": "http://schema.org/InStock"}
+    ))
 
-    with pytest.raises(ValueError, match="Preco vazio"):
+    with pytest.raises(ValueError, match="Preco invalido"):
         extrair_dados_produto(html, criar_produto())
+
+
+# O parametrize roda o mesmo teste varias vezes, uma para cada valor da lista.
+@pytest.mark.parametrize("disponibilidade", ["OutOfStock", "Discontinued", "PreOrder"])
+def test_qualquer_disponibilidade_diferente_de_instock_fica_indisponivel(disponibilidade):
+    html = montar_html(montar_produto_json(
+        {"@type": "Offer", "price": 10, "availability": f"http://schema.org/{disponibilidade}"}
+    ))
+
+    dados = extrair_dados_produto(html, criar_produto())
+
+    assert dados["status_produto"] == "indisponivel"
+    assert dados["mensagem"].startswith(disponibilidade)

@@ -1,9 +1,10 @@
 # Este programa sera usado para monitorar precos de concorrentes.
 import csv
-import re
+import json
 from datetime import datetime
 from pathlib import Path
 from time import sleep
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -14,13 +15,9 @@ ARQUIVO_PRODUTOS = PASTA_PROJETO / "dados" / "produtos.csv"
 ARQUIVO_COLETAS = PASTA_PROJETO / "dados" / "coletas.csv"
 ARQUIVO_ERROS = PASTA_PROJETO / "dados" / "erros.csv"
 
-SELETORES_POR_CONCORRENTE = {
-    "Loja A": {
-        "preco": ".vtex-product-price-1-x-sellingPrice",
-        "titulo": ".vtex-store-components-3-x-productNameContainer",
-        "indisponivel": ".vtex-availability-notify-1-x-title",
-    }
-}
+# Valor de disponibilidade padronizado pelo schema.org que indica produto em estoque.
+# Qualquer outro valor (OutOfStock, Discontinued, PreOrder...) tratamos como indisponivel.
+DISPONIVEL_SCHEMA = "InStock"
 
 
 def ler_produtos():
@@ -38,80 +35,166 @@ def ler_produtos():
     return produtos
 
 
-def buscar_seletores(concorrente):
-    if concorrente not in SELETORES_POR_CONCORRENTE:
-        raise ValueError(f"Concorrente sem seletores cadastrados: {concorrente}")
+def ler_json_ld_produto(soup):
+    # O JSON-LD fica dentro de tags <script type="application/ld+json">.
+    # Uma pagina pode ter varios desses blocos (produto, empresa, caminho de navegacao...),
+    # entao procuramos o que tem "@type": "Product".
+    for tag_script in soup.select('script[type="application/ld+json"]'):
+        texto_json = tag_script.string
 
-    return SELETORES_POR_CONCORRENTE[concorrente]
+        if not texto_json:
+            continue
+
+        try:
+            # json.loads transforma o texto JSON em dicionario (ou lista) do Python.
+            dados_json = json.loads(texto_json)
+        except json.JSONDecodeError:
+            # Se algum bloco estiver mal formatado, ignoramos e tentamos o proximo.
+            continue
+
+        # Alguns sites colocam varios objetos dentro de uma lista.
+        # Transformamos o caso de objeto unico em lista para tratar os dois do mesmo jeito.
+        if isinstance(dados_json, dict):
+            dados_json = [dados_json]
+
+        for item in dados_json:
+            if isinstance(item, dict) and item.get("@type") == "Product":
+                return item
+
+    raise ValueError("JSON-LD do produto nao encontrado na pagina.")
+
+
+def listar_ofertas(json_produto):
+    # Em "offers" a loja informa preco e disponibilidade. Pode vir de tres jeitos:
+    #   - uma oferta so:        {"@type": "Offer", "price": 26.9, ...}
+    #   - uma lista de ofertas: [{...}, {...}]
+    #   - um "AggregateOffer", que agrupa varias ofertas dentro de outro "offers"
+    #     (e o caso da Loja A: uma oferta para cada variacao/SKU do produto).
+    ofertas = json_produto.get("offers")
+
+    if isinstance(ofertas, dict) and ofertas.get("@type") == "AggregateOffer":
+        ofertas = ofertas.get("offers", [])
+
+    if isinstance(ofertas, dict):
+        ofertas = [ofertas]
+
+    if not ofertas:
+        raise ValueError("Nenhuma oferta encontrada no JSON-LD do produto.")
+
+    return ofertas
+
+
+def descobrir_sku(produto):
+    # 1o: usamos o SKU preenchido na coluna "sku" do produtos.csv (se existir).
+    sku = (produto.get("sku") or "").strip()
+
+    if sku:
+        return sku
+
+    # 2o: se o link tiver "?skuId=...", pegamos o SKU do proprio link.
+    # urlparse separa as partes da URL e parse_qs transforma "skuId=123" em {"skuId": ["123"]}.
+    parametros_url = parse_qs(urlparse(produto["url"]).query)
+
+    if "skuId" in parametros_url:
+        return parametros_url["skuId"][0]
+
+    # Nenhum SKU informado.
+    return ""
+
+
+def mesmo_sku(sku_a, sku_b):
+    # Comparamos ignorando zeros a esquerda: "03000301" e "3000301" sao o mesmo SKU.
+    return str(sku_a).lstrip("0") == str(sku_b).lstrip("0")
+
+
+def escolher_oferta(ofertas, sku):
+    # Com SKU informado, procuramos exatamente a oferta desse SKU.
+    if sku:
+        for oferta in ofertas:
+            if mesmo_sku(oferta.get("sku", ""), sku):
+                return oferta
+
+        raise ValueError(f"SKU {sku} nao encontrado entre as ofertas da pagina.")
+
+    # Sem SKU e com uma oferta so, nao ha duvida.
+    if len(ofertas) == 1:
+        return ofertas[0]
+
+    # Varias ofertas e nenhum SKU informado: preferimos registrar erro a adivinhar o preco.
+    skus = ", ".join(str(oferta.get("sku", "?")) for oferta in ofertas)
+    raise ValueError(
+        f"SKU ambiguo: a pagina tem {len(ofertas)} ofertas (SKUs {skus}). "
+        "Preencha a coluna sku no produtos.csv."
+    )
+
+
+def formatar_preco(preco_numero):
+    # Exemplo: 87.9 vira "R$87,90" (formato brasileiro, para exibir no relatorio).
+    return f"R${preco_numero:.2f}".replace(".", ",")
 
 
 def extrair_dados_produto(html, produto):
     url = produto["url"]
-    seletores = buscar_seletores(produto["concorrente"])
 
     # Transformamos o texto HTML em um objeto que o Python consegue pesquisar melhor.
     soup = BeautifulSoup(html, "html.parser")
 
-    # select_one procura o primeiro elemento que combina com o seletor CSS.
-    elemento_preco = soup.select_one(seletores["preco"])
-    elemento_titulo = soup.select_one(seletores["titulo"])
-    elemento_indisponivel = soup.select_one(seletores["indisponivel"])
+    # Lemos os dados estruturados (JSON-LD) e escolhemos a oferta do SKU certo.
+    json_produto = ler_json_ld_produto(soup)
+    ofertas = listar_ofertas(json_produto)
+    oferta = escolher_oferta(ofertas, descobrir_sku(produto))
 
-    if elemento_titulo is None:
-        raise ValueError("Titulo nao encontrado no HTML recebido pelo requests.")
+    titulo = (json_produto.get("name") or "").strip()
 
-    # get_text(strip=True) pega somente o texto visivel e remove espacos/quebras das pontas.
-    titulo = elemento_titulo.get_text(strip=True)
+    if titulo == "":
+        raise ValueError("Nome do produto nao encontrado no JSON-LD.")
+
+    # A disponibilidade vem como link do schema.org, por exemplo "http://schema.org/InStock".
+    # rsplit("/", 1) corta no ultimo "/" e [-1] pega o final: "InStock".
+    disponibilidade = str(oferta.get("availability") or "").rsplit("/", 1)[-1]
+
+    # O preco pode vir como numero (26.9) ou como texto ("26.90"); float() aceita os dois.
+    preco = oferta.get("price")
+    preco_numero = float(preco) if preco not in (None, "") else None
 
     # Registramos a data e hora em que o nosso programa viu este produto.
     data_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    if elemento_preco is None:
-        if elemento_indisponivel is not None:
-            mensagem = elemento_indisponivel.get_text(strip=True)
-
-            return {
-                "produto_id": produto["produto_id"],
-                "concorrente": produto["concorrente"],
-                "produto_nome": titulo,
-                "preco_texto": "",
-                "preco_numero": "",
-                "status_produto": "indisponivel",
-                "mensagem": mensagem,
-                "url": url,
-                "data_coleta": data_coleta,
-            }
-
-        raise ValueError("Preco nao encontrado no HTML recebido pelo requests.")
-
-    # Aqui pegamos apenas o texto do elemento HTML.
-    # Exemplos: "R$61,90/un" ou "R$56,90/m2".
-    preco_texto = elemento_preco.get_text(strip=True)
-
-    # Para comparar precos, precisamos transformar o texto em numero.
-    # Mantemos apenas digitos, virgula e ponto, depois ajustamos para o float.
-    preco_limpo = re.sub(r"[^0-9,.]", "", preco_texto)
-    preco_limpo = preco_limpo.replace(".", "").replace(",", ".")
-
-    # Convertemos o texto limpo para float.
-    # Exemplo: "61.90" vira 61.9.
-    if preco_limpo == "":
-        raise ValueError(f"Preco vazio apos limpeza: {preco_texto}")
-
-    preco_numero = float(preco_limpo)
 
     # Um dicionario guarda os dados em pares de chave e valor.
     dados_produto = {
         "produto_id": produto["produto_id"],
         "concorrente": produto["concorrente"],
         "produto_nome": titulo,
-        "preco_texto": preco_texto,
-        "preco_numero": preco_numero,
-        "status_produto": "disponivel",
+        "preco_texto": "",
+        "preco_numero": "",
+        "status_produto": "",
         "mensagem": "",
         "url": url,
         "data_coleta": data_coleta,
     }
+
+    if disponibilidade != DISPONIVEL_SCHEMA:
+        # Produto sem estoque. A loja pode ate informar um preco, mas ninguem consegue
+        # comprar por ele. Por isso NAO salvamos esse preco nas colunas de preco
+        # (para nao misturar com precos reais nas comparacoes); ele fica so na mensagem.
+        dados_produto["status_produto"] = "indisponivel"
+        dados_produto["mensagem"] = disponibilidade or "Disponibilidade nao informada"
+
+        if preco_numero is not None:
+            dados_produto["mensagem"] += f" (preco anunciado: {formatar_preco(preco_numero)})"
+
+        return dados_produto
+
+    # Produto em estoque precisa ter um preco valido.
+    if preco_numero is None:
+        raise ValueError("Preco nao encontrado na oferta do JSON-LD.")
+
+    if preco_numero <= 0:
+        raise ValueError(f"Preco invalido na oferta do JSON-LD: {preco}")
+
+    dados_produto["status_produto"] = "disponivel"
+    dados_produto["preco_texto"] = formatar_preco(preco_numero)
+    dados_produto["preco_numero"] = preco_numero
 
     return dados_produto
 

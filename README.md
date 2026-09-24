@@ -10,7 +10,8 @@ produto por produto. O projeto tambem e um estudo de automacao, coleta e tratame
 ## O que ele faz hoje
 
 - Le a lista de produtos a monitorar em `dados/produtos.csv`.
-- Acessa a pagina de cada produto e extrai nome, preco e disponibilidade.
+- Acessa a pagina de cada produto e extrai nome, preco e disponibilidade dos
+  dados estruturados da pagina (JSON-LD).
 - Salva cada coleta em `dados/coletas.csv`, montando um historico de precos.
 - Registra falhas (site fora do ar, preco nao encontrado etc.) em `dados/erros.csv`,
   sem interromper a coleta dos outros produtos.
@@ -52,6 +53,7 @@ src/
   gerar_relatorio.py   gera o relatorio HTML
 dados/
   produtos.csv         cadastro dos produtos monitorados (editavel no Excel)
+                       colunas: produto_id, concorrente, url, sku, ativo, categoria, observacao
   coletas.csv          historico de precos coletados
   erros.csv            falhas de coleta
 relatorios/
@@ -68,11 +70,27 @@ aprendizado.md         diario do desenvolvimento e conceitos aprendidos
 - Poucas execucoes por dia, apenas para produtos cadastrados.
 - Respeito ao `robots.txt` e aos termos de uso dos sites (em implementacao).
 
+## Como o preco e extraido
+
+Em vez de procurar o preco no visual da pagina (seletores CSS, que quebram quando o
+layout muda), o monitor le o **JSON-LD**: um bloco de dados estruturados no padrao
+[schema.org](https://schema.org/Product) que as lojas publicam para o Google.
+
+Quando o produto tem variacoes (tamanhos, cores), a pagina lista uma oferta por SKU.
+O monitor escolhe a oferta certa assim:
+
+1. SKU preenchido na coluna `sku` do `produtos.csv`;
+2. senao, o `?skuId=` do link;
+3. senao, se a pagina tiver uma oferta so, usa essa;
+4. senao, registra o erro "SKU ambiguo" em vez de arriscar um preco errado.
+
+Produto fora de estoque fica como `indisponivel`, sem preco; o preco anunciado vai
+para a mensagem, para consulta.
+
 ## Limitacoes conhecidas
 
-- A extracao usa seletores CSS do HTML, que quebram quando o site muda o layout.
-- Em produtos com variacoes (links com `?skuId=`), o site pode devolver o preco de
-  outra variacao. Sera resolvido na troca para dados estruturados (JSON-LD).
+- O JSON-LD da Loja A nao traz o EAN do produto, necessario para casar produtos
+  entre lojas (v2).
 
 ## Roadmap
 
@@ -80,7 +98,7 @@ aprendizado.md         diario do desenvolvimento e conceitos aprendidos
   - [x] Coleta com tratamento de erros e historico em CSV
   - [x] Relatorio HTML
   - [x] Testes automatizados com paginas HTML salvas (sem acessar o site)
-  - [ ] Extracao via dados estruturados da pagina (JSON-LD / schema.org)
+  - [x] Extracao via dados estruturados da pagina (JSON-LD / schema.org)
   - [ ] Validacao dos dados (preco vazio ou variacao absurda gera alerta)
   - [ ] Historico em SQLite
 - **v2:** mais concorrentes, produtos casados entre lojas pelo EAN, execucao agendada diaria.
