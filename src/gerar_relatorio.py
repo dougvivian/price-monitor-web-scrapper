@@ -296,10 +296,10 @@ def criar_maiores_diferencas(comparativos):
         mais_caro = melhores[-1]
         linhas.append(f"""
             <tr>
-                <td>{escape(chave)}</td>
-                <td>{escape(mais_barato["concorrente"])}</td>
+                <td class="sem-quebra">{escape(chave)}</td>
+                <td class="sem-quebra">{escape(mais_barato["concorrente"])}</td>
                 <td class="num">{escape(mais_barato["preco_texto"])}</td>
-                <td>{escape(mais_caro["concorrente"])}</td>
+                <td class="sem-quebra">{escape(mais_caro["concorrente"])}</td>
                 <td class="num">{escape(mais_caro["preco_texto"])}</td>
                 <td class="num"><strong>{escape(formatar_percentual(diferenca))}</strong></td>
             </tr>
@@ -331,7 +331,7 @@ def criar_variacoes_recentes(coletas_por_produto):
         linhas.append(f"""
             <tr>
                 <td><a href="#historico/{escape(produto_id)}">{escape(ultima["produto_nome"])}</a></td>
-                <td>{escape(ultima["concorrente"])}</td>
+                <td class="sem-quebra">{escape(ultima["concorrente"])}</td>
                 <td class="num">{escape(ultima["preco_texto"])}</td>
                 <td class="num">{criar_selo_variacao(variacao)}</td>
             </tr>
@@ -367,7 +367,7 @@ def criar_card_comparativo(chave, ultimas_coletas, categoria=""):
 
         linhas.append(f"""
             <tr>
-                <td>{escape(coleta["concorrente"])}</td>
+                <td class="sem-quebra">{escape(coleta["concorrente"])}</td>
                 <td><strong>{escape(coleta["produto_id"])}</strong> {escape(coleta["produto_nome"])}</td>
                 <td class="num">{escape(coleta["preco_texto"] or "Sem preco")}{selo}</td>
                 <td>{criar_selo_status(coleta["status_produto"])}</td>
