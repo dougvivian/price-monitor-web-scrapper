@@ -294,3 +294,15 @@ def test_cadastro_sem_coluna_obrigatoria_cancela_a_coleta(tmp_path, monkeypatch,
     assert "Colunas obrigatorias faltando no cadastro: url" in saida
     assert "Coleta cancelada" in saida
     assert not (tmp_path / "teste.db").exists()
+
+
+def test_robots_respondendo_403_bloqueia_por_seguranca(tmp_path, monkeypatch):
+    # Site que barra robos (ex.: tela de CAPTCHA) costuma responder 403 ate no robots.txt.
+    arquivo_banco = preparar_ambiente(tmp_path, monkeypatch, preco_anterior=80.0)
+    site = SiteFalso([PAGINA_VARIACAO.read_text(encoding="utf-8")], status_robots=403)
+    monkeypatch.setattr(main.requests, "get", site.get)
+
+    main.main()
+
+    assert site.acessos == 0
+    assert ler_erros(arquivo_banco)[0]["tipo_erro"] == "robots"

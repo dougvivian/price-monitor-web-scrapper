@@ -239,6 +239,29 @@ def escolher_oferta(ofertas, sku):
     )
 
 
+def ler_gtin(dados):
+    # O schema.org guarda o codigo de barras (EAN) em campos "gtin". Existem variacoes
+    # conforme o tamanho do codigo: gtin13 (EAN-13, o mais comum no Brasil), gtin14,
+    # gtin12, gtin8 ou so "gtin". Devolvemos o primeiro que estiver preenchido.
+    for campo in ("gtin13", "gtin", "gtin14", "gtin12", "gtin8"):
+        valor = str(dados.get(campo) or "").strip()
+
+        if valor:
+            return valor
+
+    return ""
+
+
+def descobrir_ean(oferta, json_produto, variacao):
+    # EAN = codigo de barras do produto. Serve para casar o mesmo produto entre lojas.
+    # Mesma regra do preco: primeiro o padrao (JSON-LD), depois o complemento.
+    #   1o: gtin da oferta escolhida (cada variacao pode ter o seu);
+    #   2o: gtin do produto no JSON-LD;
+    #   3o: EAN dos dados VTEX da variacao (lojas VTEX nao costumam ter gtin no JSON-LD).
+    # Se nada disso existir, fica vazio.
+    return ler_gtin(oferta) or ler_gtin(json_produto) or str(variacao.get("ean") or "").strip()
+
+
 def formatar_preco(preco_numero):
     # Exemplo: 87.9 vira "R$87,90" (formato brasileiro, para exibir no relatorio).
     return f"R${preco_numero:.2f}".replace(".", ",")
@@ -283,10 +306,7 @@ def extrair_dados_produto(html, produto):
         "produto_id": produto["produto_id"],
         "concorrente": produto["concorrente"],
         "produto_nome": titulo,
-        # EAN = codigo de barras do produto. Vem dos dados VTEX da variacao (o JSON-LD
-        # dessas lojas nao traz). Vai servir para casar o mesmo produto entre lojas.
-        # Se a pagina nao tiver os dados VTEX, fica vazio.
-        "ean": str(variacao.get("ean") or "").strip(),
+        "ean": descobrir_ean(oferta, json_produto, variacao),
         "preco_texto": "",
         "preco_numero": "",
         "status_produto": "",
@@ -387,13 +407,18 @@ def carregar_robots(url_produto):
     #   - site sem robots.txt (erro 4xx): nao ha regras, tudo permitido;
     #   - servidor com problema (erro 5xx) ou sem conexao: nao sabemos as regras,
     #     entao por seguranca consideramos tudo bloqueado.
+    # Com uma excecao nossa, mais cuidadosa que a RFC: 401 (nao autorizado) e
+    # 403 (proibido) indicam que o site esta barrando robos (ex.: tela de CAPTCHA).
+    # Nesses casos tambem consideramos tudo bloqueado.
     try:
         resposta = requests.get(url_robots, timeout=8)
     except requests.RequestException:
         regras.disallow_all = True
         return regras
 
-    if 400 <= resposta.status_code < 500:
+    if resposta.status_code in (401, 403):
+        regras.disallow_all = True
+    elif 400 <= resposta.status_code < 500:
         regras.allow_all = True
     elif resposta.status_code >= 500:
         regras.disallow_all = True

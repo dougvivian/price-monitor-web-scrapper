@@ -264,3 +264,34 @@ def test_sem_dados_vtex_o_ean_fica_vazio():
     dados = extrair_dados_produto(html, criar_produto())
 
     assert dados["ean"] == ""
+
+
+def test_ean_vem_do_gtin_do_json_ld():
+    # Lojas como as da plataforma Shopify publicam o EAN no proprio JSON-LD (campo "gtin").
+    json_ld = montar_produto_json(
+        {"@type": "Offer", "price": 6.9, "availability": "https://schema.org/InStock"}
+    )
+    json_ld["gtin"] = "7890000000301"
+    html = montar_html(json_ld)
+
+    dados = extrair_dados_produto(html, criar_produto())
+
+    assert dados["ean"] == "7890000000301"
+
+
+def test_gtin_da_oferta_tem_prioridade_sobre_o_do_produto():
+    json_ld = montar_produto_json({
+        "@type": "AggregateOffer",
+        "offers": [
+            {"@type": "Offer", "sku": "111", "price": 10, "gtin13": "7890000000401",
+             "availability": "http://schema.org/InStock"},
+            {"@type": "Offer", "sku": "222", "price": 20, "gtin13": "7890000000402",
+             "availability": "http://schema.org/InStock"},
+        ],
+    })
+    json_ld["gtin13"] = "7890000000400"   # gtin do produto "pai"
+    html = montar_html(json_ld)
+
+    dados = extrair_dados_produto(html, criar_produto(sku="222"))
+
+    assert dados["ean"] == "7890000000402"
