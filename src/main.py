@@ -22,6 +22,9 @@ ARQUIVO_BANCO = PASTA_PROJETO / "dados" / "monitor.db"
 # 0.5 = 50%. Acima disso o preco vira alerta e nao e salvo no historico.
 LIMITE_VARIACAO = 0.5
 
+# Segundos de espera antes de baixar de novo uma pagina que veio incompleta.
+ESPERA_NOVA_TENTATIVA = 5
+
 # Valor de disponibilidade padronizado pelo schema.org que indica produto em estoque.
 # Qualquer outro valor (OutOfStock, Discontinued, PreOrder...) tratamos como indisponivel.
 DISPONIVEL_SCHEMA = "InStock"
@@ -304,11 +307,30 @@ def criar_erro(produto, tipo_erro, mensagem):
     }
 
 
+def pagina_completa(html):
+    # As vezes o site responde com status 200, mas manda a pagina pela metade:
+    # sem o bloco JSON-LD, que e de onde tiramos o preco.
+    return "application/ld+json" in html
+
+
+def baixar_pagina(url):
+    resposta = requests.get(url, timeout=8)
+
+    # Pagina incompleta costuma ser uma falha passageira do site.
+    # Esperamos alguns segundos e tentamos UMA vez mais (sem insistir, para nao
+    # sobrecarregar o site). Se vier incompleta de novo, a extracao registra o erro.
+    if resposta.status_code == 200 and not pagina_completa(resposta.text):
+        sleep(ESPERA_NOVA_TENTATIVA)
+        resposta = requests.get(url, timeout=8)
+
+    return resposta
+
+
 def coletar_produto(conexao, produto, ultimos_precos, ultimos_alertas):
     # Coleta um produto e grava o resultado no banco.
     # Devolve "coletado", "alerta" ou "erro", para o resumo final.
     try:
-        resposta = requests.get(produto["url"], timeout=8)
+        resposta = baixar_pagina(produto["url"])
 
         if resposta.status_code != 200:
             banco.salvar_erro(conexao, criar_erro(

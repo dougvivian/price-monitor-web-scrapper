@@ -129,3 +129,57 @@ def test_sem_cadastro_de_produtos_avisa_e_nao_coleta(tmp_path, monkeypatch, caps
     assert "produtos.exemplo.csv" in saida
     # Nem chegou a abrir o banco.
     assert not (tmp_path / "teste.db").exists()
+
+
+class SiteFalso:
+    # Imita um site que devolve uma sequencia de respostas, uma por chamada,
+    # e conta quantas vezes foi acessado.
+    def __init__(self, textos):
+        self.textos = list(textos)
+        self.acessos = 0
+
+    def get(self, url, timeout):
+        texto = self.textos[min(self.acessos, len(self.textos) - 1)]
+        self.acessos += 1
+        return RespostaFalsa(texto)
+
+
+def test_pagina_incompleta_e_baixada_de_novo(tmp_path, monkeypatch):
+    arquivo_banco = preparar_ambiente(tmp_path, monkeypatch, preco_anterior=80.0)
+    pagina_boa = PAGINA_VARIACAO.read_text(encoding="utf-8")
+    # 1o acesso: pagina pela metade (sem JSON-LD). 2o acesso: pagina completa.
+    site = SiteFalso(["<html><body>carregando...</body></html>", pagina_boa])
+    monkeypatch.setattr(main.requests, "get", site.get)
+
+    main.main()
+
+    coletas, _ = ler_banco(arquivo_banco)
+    assert site.acessos == 2
+    assert coletas[-1]["preco"] == 87.9
+
+
+def test_pagina_incompleta_duas_vezes_vira_erro(tmp_path, monkeypatch):
+    arquivo_banco = preparar_ambiente(tmp_path, monkeypatch, preco_anterior=80.0)
+    site = SiteFalso(["<html><body>carregando...</body></html>"])
+    monkeypatch.setattr(main.requests, "get", site.get)
+
+    main.main()
+
+    conexao = banco.conectar(arquivo_banco)
+    erros = banco.listar_erros(conexao)
+    conexao.close()
+
+    # Tenta so uma vez a mais (2 acessos no total), sem insistir.
+    assert site.acessos == 2
+    assert len(erros) == 1
+    assert "JSON-LD" in erros[0]["mensagem"]
+
+
+def test_pagina_completa_nao_e_baixada_de_novo(tmp_path, monkeypatch):
+    preparar_ambiente(tmp_path, monkeypatch, preco_anterior=80.0)
+    site = SiteFalso([PAGINA_VARIACAO.read_text(encoding="utf-8")])
+    monkeypatch.setattr(main.requests, "get", site.get)
+
+    main.main()
+
+    assert site.acessos == 1
