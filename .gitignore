@@ -8,3 +8,6 @@ CLAUDE.local.md
 
 # Banco de dados gerado pela coleta (dado, nao codigo)
 dados/monitor.db
+
+# Relatorio HTML gerado a partir do banco (dado, nao codigo)
+relatorios/relatorio.html
