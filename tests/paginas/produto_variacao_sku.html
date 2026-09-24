@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<!--
+  Pagina SINTETICA usada nos testes (nao e copia de nenhuma loja real).
+  Imita a estrutura de uma pagina de produto de loja na plataforma VTEX:
+    - varios blocos JSON-LD (Organization, BreadcrumbList e Product);
+    - Product com AggregateOffer: uma oferta por variacao (SKU), cada uma com preco proprio;
+    - objeto __STATE__ da VTEX, com o nome completo de cada variacao.
+  Caso testado: produto com 6 medidas, acessado com ?skuId=10000103 (2,13 x 1,10m, R$87,90).
+  O preco exibido na tela e o da variacao padrao (R$61,90), que era o bug do metodo antigo.
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Telha Fibrocimento Ondulada 6mm - Loja Exemplo</title>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Loja Exemplo","url":"https://www.loja-exemplo.com.br"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Telhas","item":"https://www.loja-exemplo.com.br/telhas"}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"Telha Fibrocimento Ondulada 6mm","sku":"10000101","mpn":"10000101","offers":{"@type":"AggregateOffer","lowPrice":61.9,"highPrice":119.9,"priceCurrency":"BRL","offerCount":6,"offers":[
+{"@type":"Offer","price":61.9,"priceCurrency":"BRL","availability":"http://schema.org/InStock","sku":"10000101","itemCondition":"http://schema.org/NewCondition"},
+{"@type":"Offer","price":71.9,"priceCurrency":"BRL","availability":"http://schema.org/InStock","sku":"10000102","itemCondition":"http://schema.org/NewCondition"},
+{"@type":"Offer","price":87.9,"priceCurrency":"BRL","availability":"http://schema.org/InStock","sku":"10000103","itemCondition":"http://schema.org/NewCondition"},
+{"@type":"Offer","price":62.9,"priceCurrency":"BRL","availability":"http://schema.org/InStock","sku":"10000104","itemCondition":"http://schema.org/NewCondition"},
+{"@type":"Offer","price":99.9,"priceCurrency":"BRL","availability":"http://schema.org/InStock","sku":"10000105","itemCondition":"http://schema.org/NewCondition"},
+{"@type":"Offer","price":119.9,"priceCurrency":"BRL","availability":"http://schema.org/InStock","sku":"10000106","itemCondition":"http://schema.org/NewCondition"}
+]}}</script>
+</head>
+<body>
+<h1 class="vtex-store-components-3-x-productNameContainer"><span>Telha Fibrocimento Ondulada 6mm</span><span>1,53 x 1,10m</span></h1>
+<span class="vtex-product-price-1-x-sellingPrice">R$61,90/un</span>
+<script>
+window.__RUNTIME__ = {"account":"lojaexemplo","workspace":"master"};
+    __STATE__ = {"Product:telha-fibrocimento-ondulada-6mm":{"productId":"10000104","productName":"Telha Fibrocimento Ondulada 6mm"},
+"Product:telha-fibrocimento-ondulada-6mm.items.0":{"itemId":"10000101","name":"1,53 x 1,10m","nameComplete":"Telha Fibrocimento Ondulada 6mm 1,53 x 1,10m","ean":"7890000000011"},
+"$Product:telha-fibrocimento-ondulada-6mm.items.0.sellers.0.commertialOffer":{"Price":61.9,"AvailableQuantity":100},
+"Product:telha-fibrocimento-ondulada-6mm.items.1":{"itemId":"10000102","name":"1,83 x 1,10m","nameComplete":"Telha Fibrocimento Ondulada 6mm 1,83 x 1,10m","ean":"7890000000028"},
+"Product:telha-fibrocimento-ondulada-6mm.items.2":{"itemId":"10000103","name":"2,13 x 1,10m","nameComplete":"Telha Fibrocimento Ondulada 6mm 2,13 x 1,10m","ean":"7890000000035"},
+"Product:telha-fibrocimento-ondulada-6mm.items.3":{"itemId":"10000104","name":"2,44 x 1,10m","nameComplete":"Telha Fibrocimento Ondulada 6mm 2,44 x 1,10m","ean":"7890000000042"},
+"Product:telha-fibrocimento-ondulada-6mm.items.4":{"itemId":"10000105","name":"3,05 x 1,10m","nameComplete":"Telha Fibrocimento Ondulada 6mm 3,05 x 1,10m","ean":"7890000000059"},
+"Product:telha-fibrocimento-ondulada-6mm.items.5":{"itemId":"10000106","name":"3,66 x 1,10m","nameComplete":"Telha Fibrocimento Ondulada 6mm 3,66 x 1,10m","ean":"7890000000066"}}
+    window.outraVariavel = true;
+</script>
+</body>
+</html>

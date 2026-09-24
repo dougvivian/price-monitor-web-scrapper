@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<!--
+  Pagina SINTETICA usada nos testes (nao e copia de nenhuma loja real).
+  Imita a estrutura de uma pagina de produto de loja na plataforma VTEX.
+  Caso testado: produto fora de estoque. O JSON-LD ainda informa preco (R$229,90),
+  mas com availability OutOfStock. O SKU aparece com zero a esquerda no JSON-LD
+  ("03000301") e sem zero no __STATE__ ("3000301"), como acontece em lojas reais.
+  O nome tem acentos, para testar a leitura em UTF-8.
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Placa Cimentícia 6mm 1,20 x 3m - Loja Exemplo</title>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"Placa Cimentícia 6mm 1,20 x 3m","sku":"03000301","offers":{"@type":"AggregateOffer","lowPrice":229.9,"highPrice":229.9,"priceCurrency":"BRL","offerCount":1,"offers":[
+{"@type":"Offer","price":229.9,"priceCurrency":"BRL","availability":"http://schema.org/OutOfStock","sku":"03000301"}
+]}}</script>
+</head>
+<body>
+<h1 class="vtex-store-components-3-x-productNameContainer">Placa Cimentícia 6mm 1,20 x 3m</h1>
+<p class="vtex-availability-notify-1-x-title">Este produto não está disponível no momento</p>
+<script>
+    __STATE__ = {"Product:placa-cimenticia-6mm":{"productId":"3000301","productName":"Placa Cimentícia 6mm 1,20 x 3m"},
+"Product:placa-cimenticia-6mm.items.0":{"itemId":"3000301","name":"Peça","nameComplete":"Placa Cimentícia 6mm 1,20 x 3m Peça","ean":"7890000000202"}}
+</script>
+</body>
+</html>

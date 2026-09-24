@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<!--
+  Pagina SINTETICA usada nos testes (nao e copia de nenhuma loja real).
+  Imita a estrutura de uma pagina de produto de loja na plataforma VTEX.
+  Caso testado: produto com 2 variacoes e link SEM ?skuId= -> "SKU ambiguo",
+  a menos que o SKU seja informado na coluna sku do cadastro.
+    SKU 20000201: 2,13m x 50cm, R$26,90
+    SKU 20000202: 2,44m x 50cm, R$25,90
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Telha Ondulada Fibrocimento 4mm - Loja Exemplo</title>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Loja Exemplo"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"Telha Ondulada Fibrocimento 4mm","sku":"20000201","offers":{"@type":"AggregateOffer","lowPrice":25.9,"highPrice":26.9,"priceCurrency":"BRL","offerCount":2,"offers":[
+{"@type":"Offer","price":26.9,"priceCurrency":"BRL","availability":"http://schema.org/InStock","sku":"20000201"},
+{"@type":"Offer","price":25.9,"priceCurrency":"BRL","availability":"http://schema.org/InStock","sku":"20000202"}
+]}}</script>
+</head>
+<body>
+<h1 class="vtex-store-components-3-x-productNameContainer">Telha Ondulada Fibrocimento 4mm</h1>
+<span class="vtex-product-price-1-x-sellingPrice">R$26,90/un</span>
+<script>
+    __STATE__ = {"Product:telha-ondulada-fibrocimento-4mm":{"productId":"20000202","productName":"Telha Ondulada Fibrocimento 4mm"},
+"Product:telha-ondulada-fibrocimento-4mm.items.0":{"itemId":"20000201","name":"2,13m x 50cm","nameComplete":"Telha Ondulada Fibrocimento 4mm 2,13m x 50cm","ean":"7890000000103"},
+"Product:telha-ondulada-fibrocimento-4mm.items.1":{"itemId":"20000202","name":"2,44m x 50cm","nameComplete":"Telha Ondulada Fibrocimento 4mm 2,44m x 50cm","ean":"7890000000110"}}
+</script>
+</body>
+</html>
