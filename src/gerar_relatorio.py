@@ -1,13 +1,12 @@
 # Este programa gera um relatorio HTML com as ultimas coletas de precos.
 from collections import defaultdict
-from datetime import datetime
 from html import escape
 from pathlib import Path
 
 import banco
 # Reaproveitamos do main.py o caminho do banco e a formatacao de preco,
 # para nao repetir o mesmo codigo em dois lugares.
-from main import ARQUIVO_BANCO, calcular_variacao, formatar_preco
+from main import ARQUIVO_BANCO, agora, calcular_variacao, formatar_preco
 
 
 PASTA_PROJETO = Path(__file__).resolve().parent.parent
@@ -57,13 +56,18 @@ def variacao_desde_coleta_anterior(historico):
     return calcular_variacao(precos[1], precos[0]) * 100
 
 
-def erros_da_ultima_execucao(erros, ultima_execucao):
-    # Erros gravados a partir do inicio da ultima coleta.
-    # Como as datas estao no formato "AAAA-MM-DD HH:MM:SS", comparar o texto ja compara as datas.
+def separar_erros(erros, ultima_execucao):
+    # Separa os erros em (recentes, antigos): recentes sao os gravados a partir do inicio
+    # da ultima coleta. Como as datas estao no formato "AAAA-MM-DD HH:MM:SS", comparar o
+    # texto ja compara as datas.
+    # Sem nenhuma coleta registrada, todos os erros contam como antigos.
     if ultima_execucao is None:
-        return []
+        return [], erros
 
-    return [erro for erro in erros if erro["data_erro"] >= ultima_execucao["inicio"]]
+    inicio = ultima_execucao["inicio"]
+    recentes = [erro for erro in erros if erro["data_erro"] >= inicio]
+    antigos = [erro for erro in erros if erro["data_erro"] < inicio]
+    return recentes, antigos
 
 
 def criar_resumo_execucao(ultima_execucao):
@@ -217,8 +221,8 @@ def gerar_html(coletas, erros, alertas, ultima_execucao=None):
 
     # Separamos os erros da ultima coleta (o que precisa de atencao agora)
     # dos erros antigos (so para consulta; mostramos os 20 mais recentes).
-    erros_recentes = erros_da_ultima_execucao(erros, ultima_execucao)
-    erros_antigos = [erro for erro in erros if erro not in erros_recentes][-20:]
+    erros_recentes, erros_antigos = separar_erros(erros, ultima_execucao)
+    erros_antigos = erros_antigos[-20:]
     produtos_com_erro = {erro["produto_id"] for erro in erros_recentes}
 
     produtos_ordenados = sorted(
@@ -232,7 +236,7 @@ def gerar_html(coletas, erros, alertas, ultima_execucao=None):
     tabela_erros_recentes = criar_tabela_erros(erros_recentes, "Nenhum erro na ultima coleta.")
     tabela_erros_antigos = criar_tabela_erros(list(reversed(erros_antigos)), "Nenhum erro anterior.")
     resumo_execucao = criar_resumo_execucao(ultima_execucao)
-    data_geracao = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data_geracao = agora()
 
     # Dicionario produto_id -> nome da ultima coleta, usado na tabela de alertas.
     nomes_produtos = {

@@ -279,3 +279,18 @@ def test_coleta_registra_a_execucao_no_banco(tmp_path, monkeypatch):
 
     assert execucao["fim"] is not None
     assert (execucao["produtos"], execucao["coletados"], execucao["erros"], execucao["alertas"]) == (1, 1, 0, 0)
+
+
+def test_cadastro_sem_coluna_obrigatoria_cancela_a_coleta(tmp_path, monkeypatch, capsys):
+    arquivo_produtos = tmp_path / "produtos.csv"
+    # Cadastro sem a coluna "url" (como se tivesse sido apagada no Excel).
+    arquivo_produtos.write_text("produto_id;concorrente;ativo\nPRD-001;Loja A;sim\n", encoding="utf-8")
+    monkeypatch.setattr(main, "ARQUIVO_PRODUTOS", arquivo_produtos)
+    monkeypatch.setattr(main, "ARQUIVO_BANCO", tmp_path / "teste.db")
+
+    main.main()   # antes desta correcao, quebrava com KeyError
+
+    saida = capsys.readouterr().out
+    assert "Colunas obrigatorias faltando no cadastro: url" in saida
+    assert "Coleta cancelada" in saida
+    assert not (tmp_path / "teste.db").exists()

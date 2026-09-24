@@ -1,4 +1,7 @@
-# Este programa sera usado para monitorar precos de concorrentes.
+# Coleta os precos dos produtos cadastrados em dados/produtos.csv, valida cada preco
+# e grava o resultado no banco de dados (dados/monitor.db).
+#
+# Para rodar:  python src/main.py
 import csv
 import json
 from datetime import datetime
@@ -31,6 +34,9 @@ ESPERA_NOVA_TENTATIVA = 5
 # que valem para qualquer robo.
 AGENTE_ROBOTS = "*"
 
+# Colunas que o produtos.csv precisa ter. Sem elas a coleta nao consegue rodar.
+COLUNAS_OBRIGATORIAS = ["produto_id", "concorrente", "url", "ativo"]
+
 # Valor de disponibilidade padronizado pelo schema.org que indica produto em estoque.
 # Qualquer outro valor (OutOfStock, Discontinued, PreOrder...) tratamos como indisponivel.
 DISPONIVEL_SCHEMA = "InStock"
@@ -48,6 +54,15 @@ def ler_cadastro():
         return list(csv.DictReader(arquivo_csv, delimiter=";"))
 
 
+def colunas_faltando(linhas):
+    # Lista as colunas obrigatorias que nao existem no cadastro.
+    # linhas[0] e a primeira linha de dados; as chaves dela sao os nomes das colunas.
+    if not linhas:
+        return []
+
+    return [coluna for coluna in COLUNAS_OBRIGATORIAS if coluna not in linhas[0]]
+
+
 def validar_cadastro(linhas):
     # Confere o cadastro ANTES de coletar e devolve uma lista de avisos (texto).
     # Um erro de digitacao no Excel (ID repetido, coluna apagada, "Sim " com espaco...)
@@ -58,11 +73,10 @@ def validar_cadastro(linhas):
         return ["O cadastro de produtos esta vazio."]
 
     # Colunas obrigatorias: se faltar alguma, nem da para conferir o resto.
-    colunas_obrigatorias = ["produto_id", "concorrente", "url", "ativo"]
-    colunas_faltando = [coluna for coluna in colunas_obrigatorias if coluna not in linhas[0]]
+    faltando = colunas_faltando(linhas)
 
-    if colunas_faltando:
-        return [f"Colunas obrigatorias faltando no cadastro: {', '.join(colunas_faltando)}"]
+    if faltando:
+        return [f"Colunas obrigatorias faltando no cadastro: {', '.join(faltando)}"]
 
     # Um set guarda valores sem repeticao; usamos para achar IDs repetidos.
     ids_vistos = set()
@@ -93,11 +107,6 @@ def filtrar_ativos(linhas):
     # So coletamos os produtos marcados como ativos.
     # strip() e lower() aceitam variacoes como "Sim" ou "sim " digitadas no Excel.
     return [linha for linha in linhas if (linha["ativo"] or "").strip().lower() == "sim"]
-
-
-def ler_produtos():
-    # Atalho usado em outros pontos do projeto: le o cadastro e devolve so os ativos.
-    return filtrar_ativos(ler_cadastro())
 
 
 def ler_json_ld_produto(soup):
@@ -312,8 +321,6 @@ def extrair_dados_produto(html, produto):
     return dados_produto
 
 
-
-
 def calcular_variacao(preco_anterior, preco_novo):
     # Variacao percentual em forma decimal. Exemplos:
     #   de 100 para 150 -> 0.5  (subiu 50%)
@@ -333,9 +340,10 @@ def validar_preco(preco_anterior, preco_novo, preco_ultimo_alerta):
     if abs(calcular_variacao(preco_anterior, preco_novo)) <= LIMITE_VARIACAO:
         return True
 
-    # Variacao grande, mas o MESMO preco ja tinha gerado alerta na coleta anterior:
-    # o site confirmou o preco duas vezes seguidas, entao consideramos que e real.
+    # Variacao grande, mas o ultimo alerta deste produto foi exatamente este preco:
+    # o site mostrou o mesmo valor de novo, entao consideramos que o preco e real.
     # Sem essa regra, um aumento real acima do limite ficaria bloqueado para sempre.
+    # (Na coleta diaria, o "ultimo alerta" normalmente e o da coleta anterior.)
     if preco_ultimo_alerta == preco_novo:
         return True
 
@@ -503,6 +511,12 @@ def main():
     # Os avisos nao interrompem a coleta: so ficam visiveis no terminal/log para corrigir.
     for aviso in validar_cadastro(cadastro):
         print("AVISO no cadastro:", aviso)
+
+    # A excecao: sem as colunas obrigatorias nao da para coletar nada (o programa quebraria
+    # ao procurar a url ou o produto_id). Nesse caso paramos antes de comecar.
+    if colunas_faltando(cadastro):
+        print("Coleta cancelada: corrija as colunas do cadastro e rode de novo.")
+        return
 
     produtos = filtrar_ativos(cadastro)
     conexao = banco.conectar(ARQUIVO_BANCO)
