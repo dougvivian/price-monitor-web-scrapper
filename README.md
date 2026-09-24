@@ -12,36 +12,18 @@
 
 [Experimente](#experimente-em-1-minuto) ·
 [Como funciona](#como-funciona) ·
-[Decisões técnicas](#decisões-técnicas) ·
-[Coleta responsável](#coleta-responsável)
+[Decisões técnicas](#decisões-técnicas)
 
 <img src="docs/visao-geral.png" alt="Visão geral do relatório" width="900">
 
-<sub>Imagens do modo demonstração, com lojas e produtos fictícios.</sub>
+<sub>Imagem do modo demonstração, com lojas e produtos fictícios.</sub>
 
 </div>
-
-## Sobre
-
-Trabalho no varejo de materiais de construção, e a pesquisa de preços da concorrência
-era feita à mão, produto por produto. Este projeto automatiza isso: todo dia de manhã
-ele acessa as páginas dos produtos monitorados, extrai preço e disponibilidade, valida
-os dados, guarda o histórico e gera um relatório com o comparativo entre as lojas.
-
-| | |
-|---|---|
-| **Extração robusta** | Lê os dados estruturados da página (JSON-LD / schema.org), não o visual. Funciona em lojas VTEX e Shopify com o mesmo código. |
-| **Dados confiáveis** | Variação acima de 50% vira alerta em vez de entrar no histórico. EAN validado pelo dígito verificador. Na dúvida, registra erro em vez de chutar. |
-| **Comparativo entre lojas** | O mesmo produto é casado pelo código de barras; equivalentes de marcas diferentes, por um grupo no cadastro. |
-| **Relatório em um arquivo** | Abas, filtros, ordenação, gráfico de histórico em SVG, modo escuro e layout para celular. Sem framework. |
-| **Automação e testes** | Execução diária agendada com log, 107 testes sem internet e CI no GitHub Actions. |
-| **Coleta responsável** | Respeita o robots.txt, faz pausas e não contorna proteções anti-robô. |
 
 ## Experimente em 1 minuto
 
 O modo demonstração cria um banco com 3 lojas fictícias e 30 dias de histórico
-simulado (preços subindo e caindo, promoção, produto indisponível, alerta e erros) e
-gera o relatório. Não acessa nenhum site.
+simulado e gera o relatório. Não acessa nenhum site.
 
 ```bash
 git clone https://github.com/dougvivian/price-monitor-web-scrapper.git
@@ -51,20 +33,6 @@ python src/demo.py
 ```
 
 Depois, abra `relatorios/demo.html` no navegador.
-
-## Telas
-
-| Comparador entre lojas | Histórico com gráfico |
-|---|---|
-| ![Comparador](docs/comparador.png) | ![Histórico](docs/historico.png) |
-| **Produtos, com busca e filtros** | **Modo escuro automático** |
-| ![Produtos](docs/produtos.png) | ![Modo escuro](docs/escuro.png) |
-
-<details>
-<summary><b>Versão para celular</b></summary>
-<br>
-<img src="docs/celular.png" alt="Relatório no celular" width="360">
-</details>
 
 ## Como funciona
 
@@ -110,9 +78,9 @@ python src/gerar_relatorio.py
 
 Depois, abra `relatorios/relatorio.html` no navegador.
 
-O cadastro (`produtos.csv`) é editável no Excel e tem as colunas `produto_id`,
-`concorrente`, `url`, `sku`, `ativo`, `categoria`, `observacao` e `grupo`. O `grupo` é
-opcional: produtos com o mesmo código são comparados entre si.
+O cadastro (`produtos.csv`) tem as colunas `produto_id`, `concorrente`, `url`, `sku`,
+`ativo`, `categoria`, `observacao` e `grupo`. O `grupo` é opcional: produtos com o
+mesmo código são comparados entre si.
 
 <details>
 <summary><b>Coleta automática diária (Agendador de Tarefas do Windows)</b></summary>
@@ -137,9 +105,8 @@ schtasks /Create /TN "Monitor de Precos - coleta diaria" /SC DAILY /ST 09:00 ^
 python -m pytest
 ```
 
-Os testes usam páginas HTML sintéticas em `tests/paginas/` e um site falso no lugar
-do `requests.get`, então não acessam a internet. Eles também rodam no **GitHub
-Actions** a cada push (`.github/workflows/testes.yml`).
+Os testes usam páginas HTML sintéticas e um site falso no lugar do `requests.get`,
+então não acessam a internet. Eles também rodam no **GitHub Actions** a cada push.
 
 ## Estrutura
 
@@ -159,92 +126,35 @@ dados/
   monitor.db            banco SQLite: coletas, erros, alertas, execucoes (fora do Git)
 relatorios/             relatórios gerados (fora do Git)
 tests/                  testes com pytest e páginas HTML sintéticas
-docs/                   imagens do README
 ```
 
 ## Como o preço é extraído
 
-Em vez de procurar o preço no visual da página (seletores CSS, que quebram quando o
-layout muda), o monitor lê o **JSON-LD**: um bloco de dados estruturados no padrão
-[schema.org](https://schema.org/Product) que as lojas publicam para o Google. Funciona
-em qualquer loja que publique esse padrão; foi testado em lojas **VTEX** e **Shopify**.
-
-Quando o produto tem variações (tamanhos, cores), a página lista uma oferta por SKU.
-O monitor escolhe a oferta certa assim:
-
-1. SKU preenchido na coluna `sku` do cadastro;
-2. senão, o `?skuId=` do link;
-3. senão, se a página tiver uma oferta só, usa essa;
-4. senão, registra o erro "SKU ambíguo" em vez de arriscar um preço errado.
-
-Produto fora de estoque fica como `indisponivel`, sem preço; o preço anunciado vai
-para a mensagem, para consulta.
-
-Nas lojas VTEX, a página também traz um objeto `__STATE__` com os dados de cada
-variação. O monitor usa esse objeto só como complemento, para o nome completo da
-variação e o EAN. O preço vem sempre do JSON-LD.
+O monitor lê o **JSON-LD** da página: dados estruturados no padrão
+[schema.org](https://schema.org/Product) que as lojas publicam para o Google. Não
+depende do visual da página, e o mesmo código funciona em lojas **VTEX** e **Shopify**.
+Quando o produto tem variações, a oferta certa é escolhida pelo SKU; se não der para
+saber qual é, o monitor registra erro em vez de arriscar um preço.
 
 ## Decisões técnicas
 
-**JSON-LD em vez de seletores CSS.** A primeira versão lia o preço pelo HTML visível.
-Em produtos com variações, o site devolvia o preço da variação padrão, e não a do link:
-uma telha de R$87,90 era salva como R$61,90. Com o JSON-LD, que traz uma oferta por SKU,
-o erro sumiu. Comparando os dois métodos no mesmo dia, 41 produtos bateram e todas as
-diferenças eram casos de variação que o método antigo errava.
-
-**Preço só do JSON-LD, sem "plano B".** Às vezes o site entrega a página incompleta,
-sem JSON-LD. Os dados VTEX da página ainda têm o preço, mas não são um padrão.
-Preferi registrar o erro (e tentar de novo uma vez) a depender de um formato próprio
-da plataforma. Resultado: em alguns dias, alguns produtos ficam sem coleta.
-
-**Erro visível em vez de preço chutado.** Página com várias variações e nenhum SKU
-informado gera "SKU ambíguo". Produto fora de estoque não entra com preço. Um erro no
-relatório é melhor que um preço errado salvo em silêncio.
-
-**Validação com confirmação.** Variação acima de 50% vira alerta e não entra no
-histórico. Mas, se só rejeitasse, um aumento real ficaria bloqueado para sempre. Por
-isso o mesmo preço, visto de novo na coleta seguinte, é aceito.
-
-**EAN validado pelo dígito verificador.** Uma das lojas preenchia o campo `gtin` do
-produto com o código interno do SKU, e todas as medidas de uma telha ficavam com o
-mesmo "EAN". Agora o monitor procura o EAN da variação primeiro e só aceita códigos
-com dígito verificador válido.
-
-**Comparação entre lojas: EAN automático + grupo manual.** O EAN casa sozinho o mesmo
-produto em lojas diferentes. Mas produtos equivalentes de marcas diferentes (ex.: o
-mesmo vergalhão CA50 10mm de outra usina) têm EANs diferentes e também interessam. Para
-esses, a coluna `grupo` do cadastro dá o mesmo código aos equivalentes. A diferença de
-preço compara **lojas**: a opção mais barata de cada uma.
-
-**SQLite.** O histórico começou em CSV. O SQLite continua sendo um arquivo só, sem
-servidor, mas dá consultas SQL (último preço de cada produto com `GROUP BY`), tipos de
-dados e colunas novas sem quebrar o arquivo, com uma migração automática (`ALTER
-TABLE`). O cadastro continua em CSV porque é editado à mão no Excel.
-
-**Relatório em um arquivo só, mas editável.** O CSS e o JavaScript ficam em arquivos
-próprios e são copiados para dentro do HTML na hora de gerar. Assim o relatório pode
-ser enviado sozinho (e-mail, WhatsApp) sem perder o visual. O HTML de cada aba é
-montado no Python, o que permite testá-lo com pytest; o gráfico é um SVG calculado no
-próprio Python, sem biblioteca.
-
-**Testes sem internet.** As páginas de teste são sintéticas e o `requests.get` é
-trocado por um site falso (`monkeypatch`). Os testes são rápidos, repetíveis e não
-incomodam os sites.
-
-**Dados reais fora do repositório.** O cadastro real mostra quais produtos são
-monitorados, uma informação comercial. Ele, o banco e os relatórios ficam fora do Git;
-no repositório há só um modelo de cadastro, páginas de teste e uma demonstração com
-dados fictícios.
-
-## Coleta responsável
-
-- Respeita o `robots.txt` seguindo a RFC 9309, com uma regra mais cuidadosa: se o
-  próprio `robots.txt` responde 401 ou 403, o site é tratado como bloqueado.
-- Pausa entre os acessos, uma única tentativa extra e uma execução por dia.
-- Só acessa as páginas dos produtos cadastrados.
-- **Não contorna proteções anti-robô.** Dois concorrentes que eu queria monitorar
-  bloqueiam acessos automáticos (CAPTCHA). Eles ficaram de fora: o monitor detecta o
-  bloqueio e não acessa o site, em vez de disfarçar o programa de navegador.
+- **JSON-LD em vez de seletores CSS:** a primeira versão salvava o preço da variação
+  errada em produtos com várias medidas. O JSON-LD traz uma oferta por SKU e resolveu.
+- **Erro visível em vez de preço chutado:** dado duvidoso vira erro no relatório, não
+  um preço errado salvo em silêncio.
+- **Validação com confirmação:** variação acima de 50% vira alerta; se o mesmo preço
+  aparecer de novo, é aceito, para um aumento real não ficar bloqueado.
+- **EAN validado pelo dígito verificador:** uma loja colocava o código do SKU no campo
+  do EAN. Só códigos de barras válidos são aceitos.
+- **Comparação entre lojas:** o mesmo produto é casado pelo EAN; equivalentes de marcas
+  diferentes, por um `grupo` no cadastro.
+- **SQLite:** um arquivo só, sem servidor, com consultas SQL e migração automática de
+  colunas.
+- **Relatório em um arquivo só:** CSS e JavaScript ficam em arquivos próprios e são
+  copiados para dentro do HTML, que pode ser enviado sozinho.
+- **Testes sem internet:** páginas sintéticas e um site falso com `monkeypatch`.
+- **Dados reais fora do repositório:** o cadastro real, o banco e os relatórios não vão
+  para o Git.
 
 ## Limitações conhecidas
 
@@ -280,7 +190,3 @@ dados fictícios.
 
 Python, requests, BeautifulSoup, SQLite (SQL), pytest, GitHub Actions,
 HTML/CSS/JavaScript, SVG.
-
-## Licença
-
-[MIT](LICENSE)
