@@ -1,68 +1,104 @@
-# Monitor de Precos de Concorrentes
+# Monitor de Preços de Concorrentes
 
 ![Testes](https://github.com/dougvivian/price-monitor-web-scrapper/actions/workflows/testes.yml/badge.svg)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green)
 
-Ferramenta em Python que coleta automaticamente os precos de produtos em sites de
-concorrentes do varejo de materiais de construcao, guarda o historico e gera um
-relatorio HTML para consulta.
+Ferramenta em Python que coleta automaticamente os preços de produtos em sites de
+concorrentes do varejo de materiais de construção, valida os dados, guarda o histórico
+e gera um relatório HTML com comparativo entre lojas.
 
-Nasceu de um problema real do meu trabalho: pesquisar precos da concorrencia manualmente,
-produto por produto. O projeto tambem e um estudo de automacao, coleta e tratamento de dados.
+Nasceu de um problema real do meu trabalho: pesquisar preços da concorrência
+manualmente, produto por produto. Hoje a coleta roda sozinha todo dia de manhã.
 
-## O que ele faz hoje
+![Visão geral do relatório](docs/visao-geral.png)
 
-- Le a lista de produtos a monitorar em `dados/produtos.csv` e confere o cadastro antes
-  de comecar (ID repetido, coluna faltando, URL invalida...).
-- Respeita o `robots.txt` de cada site: pagina bloqueada nao e acessada.
-- Acessa a pagina de cada produto e extrai nome, preco, disponibilidade e EAN dos
-  dados estruturados da pagina (JSON-LD).
-- Salva cada coleta em um banco de dados SQLite (`dados/monitor.db`), montando um
-  historico de precos.
-- Registra falhas (site fora do ar, preco nao encontrado etc.) na tabela `erros`,
-  sem interromper a coleta dos outros produtos.
-- Valida cada preco antes de salvar: se ele variar mais de 50% em relacao a ultima
-  coleta do produto, vira um registro na tabela `alertas` e nao entra no historico.
-  Se o mesmo preco aparecer de novo na coleta seguinte, ele e considerado confirmado e
-  e salvo (assim um aumento real nao fica bloqueado para sempre).
-- Roda sozinho todo dia (Agendador de Tarefas do Windows) e grava um log de cada execucao.
-- Gera `relatorios/relatorio.html`, uma pagina com menu lateral e abas:
-  - **Visao geral:** indicadores, maiores diferencas de preco entre lojas e precos que mudaram;
-  - **Comparador:** o mesmo produto (mesmo EAN) ou produtos equivalentes (mesmo `grupo`
-    no cadastro), do mais barato para o mais caro, com filtro por categoria;
-  - **Produtos:** tabela com busca, filtros (loja, categoria, status) e ordenacao por coluna;
-  - **Historico:** grafico de linha (SVG, sem biblioteca) e tabela de cada produto;
-  - **Alertas** e **Erros** (os da ultima coleta separados dos anteriores).
+> As imagens são do **modo demonstração**, com lojas e produtos fictícios.
 
-  O relatorio e um arquivo so (CSS e JavaScript vao dentro dele), funciona no celular e
-  tem modo escuro automatico.
+## Experimente em 1 minuto
 
-Funciona com lojas que publicam dados estruturados **schema.org** (JSON-LD) nas paginas
-de produto, padrao comum no varejo online brasileiro. Testado em lojas **VTEX** e
-**Shopify**.
+O modo demonstração cria um banco com 3 lojas fictícias e 30 dias de histórico
+simulado (preços subindo e caindo, promoção, produto indisponível, alerta e erros) e
+gera o relatório. Não acessa nenhum site.
 
-## Como rodar
+```bash
+pip install -r requirements.txt
+python src/demo.py
+```
+
+Depois, abra `relatorios/demo.html` no navegador.
+
+## O que ele faz
+
+- **Coleta:** lê a lista de produtos em `dados/produtos.csv`, acessa a página de cada um
+  e extrai nome, preço, disponibilidade e EAN dos dados estruturados da página (JSON-LD).
+- **Coleta responsável:** respeita o `robots.txt` de cada site, faz pausas entre os
+  acessos e tenta de novo uma única vez.
+- **Validação:** um preço que varia mais de 50% vira alerta e não entra no histórico,
+  a menos que se confirme na coleta seguinte.
+- **Histórico:** cada coleta vai para um banco SQLite. Falhas ficam registradas sem
+  interromper a coleta dos outros produtos.
+- **Comparativo entre lojas:** casa o mesmo produto pelo EAN (código de barras)
+  automaticamente, e produtos equivalentes de marcas diferentes por um `grupo`
+  definido no cadastro.
+- **Relatório:** uma página com menu lateral e abas.
+  - **Visão geral:** indicadores, maiores diferenças de preço entre lojas e preços que mudaram.
+  - **Comparador:** do mais barato para o mais caro, com filtro por categoria.
+  - **Produtos:** busca, filtros e ordenação por coluna.
+  - **Histórico:** gráfico de linha de cada produto.
+  - **Alertas** e **Erros:** os da última coleta separados dos anteriores.
+- **Automação:** roda sozinho todo dia (Agendador de Tarefas do Windows) e grava log.
+
+O relatório é um arquivo só (o CSS e o JavaScript vão dentro dele), funciona no celular
+e tem modo escuro automático.
+
+| Comparador | Histórico |
+|---|---|
+| ![Comparador](docs/comparador.png) | ![Histórico](docs/historico.png) |
+
+## Como funciona
+
+```mermaid
+flowchart LR
+    A[produtos.csv<br>cadastro] --> B[Coleta<br>main.py]
+    R[robots.txt] -. permite? .-> B
+    B --> C[Extração<br>JSON-LD]
+    C --> D{Validação<br>variou > 50%?}
+    D -- não --> E[(SQLite<br>coletas)]
+    D -- sim --> F[(SQLite<br>alertas)]
+    B -- falhou --> G[(SQLite<br>erros)]
+    E --> H[Relatório HTML<br>gerar_relatorio.py]
+    F --> H
+    G --> H
+```
+
+## Como rodar com os seus produtos
 
 Requisitos: Python 3.10 ou superior.
 
 ```bash
-# 1. Instalar as dependencias
+# 1. Instalar as dependências
 pip install -r requirements.txt
 
-# 2. Criar o cadastro de produtos a partir do modelo e preencher com os seus produtos
+# 2. Criar o cadastro a partir do modelo e preencher com os seus produtos
 cp dados/produtos.exemplo.csv dados/produtos.csv
 
-# 3. Coletar os precos (acessa o site dos concorrentes)
+# 3. Coletar os preços (acessa o site das lojas)
 python src/main.py
 
-# 4. Gerar o relatorio HTML a partir do banco de dados
+# 4. Gerar o relatório a partir do banco de dados
 python src/gerar_relatorio.py
 ```
 
 Depois, abra `relatorios/relatorio.html` no navegador.
 
-### Coleta automatica diaria
+O cadastro (`produtos.csv`) é editável no Excel e tem as colunas `produto_id`,
+`concorrente`, `url`, `sku`, `ativo`, `categoria`, `observacao` e `grupo`. O `grupo` é
+opcional: produtos com o mesmo código são comparados entre si.
 
-O script `src/coleta_diaria.py` roda a coleta e gera o relatorio em sequencia, gravando
+### Coleta automática diária
+
+O script `src/coleta_diaria.py` roda a coleta e gera o relatório em sequência, gravando
 tudo em `logs/coleta_diaria.log`. Para rodar sozinho todo dia no Windows, cadastre no
 Agendador de Tarefas (no Prompt de Comando):
 
@@ -71,7 +107,7 @@ schtasks /Create /TN "Monitor de Precos - coleta diaria" /SC DAILY /ST 09:00 ^
   /TR "\"C:\caminho\para\pythonw.exe\" \"C:\caminho\do\projeto\src\coleta_diaria.py\""
 ```
 
-`pythonw.exe` e o Python sem janela de terminal, para a coleta rodar em segundo plano.
+`pythonw.exe` é o Python sem janela de terminal, para a coleta rodar em segundo plano.
 
 ### Testes
 
@@ -79,146 +115,149 @@ schtasks /Create /TN "Monitor de Precos - coleta diaria" /SC DAILY /ST 09:00 ^
 python -m pytest
 ```
 
-Os testes usam paginas HTML sinteticas em `tests/paginas/`, que imitam a estrutura de
-uma loja VTEX, e nao acessam a internet. Eles tambem rodam automaticamente no
-**GitHub Actions** a cada push (`.github/workflows/testes.yml`).
+Os testes usam páginas HTML sintéticas em `tests/paginas/` e um site falso no lugar
+do `requests.get`, então não acessam a internet. Eles também rodam no **GitHub
+Actions** a cada push (`.github/workflows/testes.yml`).
 
 ## Estrutura
 
 ```text
 src/
-  main.py              coleta os precos e valida as variacoes
-  coleta_diaria.py     roda coleta + relatorio e grava log (usado no agendamento)
-  banco.py             acesso ao banco SQLite (todo o SQL do projeto fica aqui)
-  gerar_relatorio.py   gera o relatorio HTML
+  main.py               coleta os preços, extrai os dados da página e valida
+  banco.py              acesso ao banco SQLite (todo o SQL do projeto fica aqui)
+  gerar_relatorio.py    gera o relatório HTML
+  coleta_diaria.py      roda coleta + relatório e grava log (usado no agendamento)
+  demo.py               modo demonstração com dados fictícios
   relatorio/
-    estilo.css         visual do relatorio (cores e espacamentos em variaveis no topo)
-    interacao.js       abas, filtros e ordenacao (JavaScript puro)
+    estilo.css          visual do relatório (cores e espaçamentos em variáveis no topo)
+    interacao.js        abas, filtros e ordenação (JavaScript puro)
 dados/
-  produtos.exemplo.csv modelo do cadastro de produtos
-  produtos.csv         cadastro real dos produtos monitorados (editavel no Excel, fora do Git)
-                       colunas: produto_id, concorrente, url, sku, ativo, categoria, observacao,
-                       grupo (opcional: mesmo codigo = produtos equivalentes entre lojas)
-  monitor.db           banco SQLite, criado na primeira coleta (fora do Git)
-                       tabelas: coletas, erros, alertas, execucoes
-relatorios/
-  relatorio.html       relatorio gerado (fora do Git)
-tests/
-  test_extracao.py     extracao de dados da pagina (JSON-LD, SKU, EAN)
-  test_validacao.py    regras de validacao de preco
-  test_cadastro.py     conferencia do cadastro de produtos
-  test_coleta.py       fluxo completo sem acessar o site (inclui robots.txt e nova tentativa)
-  test_coleta_diaria.py script de coleta diaria e log
-  test_banco.py        consultas SQL e migracao do banco (banco em memoria)
-  test_relatorio.py    relatorio HTML
-  paginas/             paginas HTML sinteticas usadas nos testes
-.github/workflows/
-  testes.yml           roda os testes no GitHub a cada push
+  produtos.exemplo.csv  modelo do cadastro de produtos
+  produtos.csv          cadastro real (fora do Git)
+  monitor.db            banco SQLite: coletas, erros, alertas, execucoes (fora do Git)
+relatorios/             relatórios gerados (fora do Git)
+tests/                  testes com pytest e páginas HTML sintéticas
+docs/                   imagens do README
 ```
 
-## Como o preco e extraido
+## Como o preço é extraído
 
-Em vez de procurar o preco no visual da pagina (seletores CSS, que quebram quando o
-layout muda), o monitor le o **JSON-LD**: um bloco de dados estruturados no padrao
-[schema.org](https://schema.org/Product) que as lojas publicam para o Google.
+Em vez de procurar o preço no visual da página (seletores CSS, que quebram quando o
+layout muda), o monitor lê o **JSON-LD**: um bloco de dados estruturados no padrão
+[schema.org](https://schema.org/Product) que as lojas publicam para o Google. Funciona
+em qualquer loja que publique esse padrão; foi testado em lojas **VTEX** e **Shopify**.
 
-Quando o produto tem variacoes (tamanhos, cores), a pagina lista uma oferta por SKU.
+Quando o produto tem variações (tamanhos, cores), a página lista uma oferta por SKU.
 O monitor escolhe a oferta certa assim:
 
-1. SKU preenchido na coluna `sku` do `produtos.csv`;
-2. senao, o `?skuId=` do link;
-3. senao, se a pagina tiver uma oferta so, usa essa;
-4. senao, registra o erro "SKU ambiguo" em vez de arriscar um preco errado.
+1. SKU preenchido na coluna `sku` do cadastro;
+2. senão, o `?skuId=` do link;
+3. senão, se a página tiver uma oferta só, usa essa;
+4. senão, registra o erro "SKU ambíguo" em vez de arriscar um preço errado.
 
-Produto fora de estoque fica como `indisponivel`, sem preco; o preco anunciado vai
+Produto fora de estoque fica como `indisponivel`, sem preço; o preço anunciado vai
 para a mensagem, para consulta.
 
-Em lojas da plataforma VTEX, a pagina tambem traz um objeto `__STATE__` com os dados
-de cada variacao. O monitor usa esse objeto so como complemento, para o nome completo
-da variacao (ex.: `Telha ... 2,13 x 1,10m`) e o EAN. O preco vem sempre do JSON-LD.
+Nas lojas VTEX, a página também traz um objeto `__STATE__` com os dados de cada
+variação. O monitor usa esse objeto só como complemento, para o nome completo da
+variação e o EAN. O preço vem sempre do JSON-LD.
 
-## Decisoes tecnicas
+## Decisões técnicas
 
-**JSON-LD em vez de seletores CSS.** A primeira versao lia o preco pelo HTML visivel.
-Em produtos com variacoes, o site devolvia o preco da variacao padrao, e nao a do link:
+**JSON-LD em vez de seletores CSS.** A primeira versão lia o preço pelo HTML visível.
+Em produtos com variações, o site devolvia o preço da variação padrão, e não a do link:
 uma telha de R$87,90 era salva como R$61,90. Com o JSON-LD, que traz uma oferta por SKU,
-o erro sumiu. Comparando os dois metodos no mesmo dia, 41 produtos bateram e todas as
-diferencas eram casos de variacao que o metodo antigo errava.
+o erro sumiu. Comparando os dois métodos no mesmo dia, 41 produtos bateram e todas as
+diferenças eram casos de variação que o método antigo errava.
 
-**Preco so do JSON-LD, sem "plano B".** Algumas vezes o site entrega a pagina
-incompleta, sem JSON-LD. Os dados VTEX da pagina ainda tem o preco, mas nao sao um
-padrao. Preferimos registrar o erro (e tentar de novo uma vez) a depender de um formato
-proprio da plataforma. Resultado: em alguns dias, alguns produtos ficam sem coleta.
+**Preço só do JSON-LD, sem "plano B".** Às vezes o site entrega a página incompleta,
+sem JSON-LD. Os dados VTEX da página ainda têm o preço, mas não são um padrão.
+Preferi registrar o erro (e tentar de novo uma vez) a depender de um formato próprio
+da plataforma. Resultado: em alguns dias, alguns produtos ficam sem coleta.
 
-**Erro visivel em vez de preco chutado.** Pagina com varias variacoes e nenhum SKU
-informado gera "SKU ambiguo". Produto fora de estoque nao entra com preco. Um erro no
-relatorio e melhor que um preco errado salvo em silencio.
+**Erro visível em vez de preço chutado.** Página com várias variações e nenhum SKU
+informado gera "SKU ambíguo". Produto fora de estoque não entra com preço. Um erro no
+relatório é melhor que um preço errado salvo em silêncio.
 
-**Validacao com confirmacao.** Variacao acima de 50% vira alerta e nao entra no
-historico. Mas se so rejeitasse, um aumento real ficaria bloqueado para sempre. Por isso
-o mesmo preco, visto em duas coletas seguidas, e aceito.
+**Validação com confirmação.** Variação acima de 50% vira alerta e não entra no
+histórico. Mas, se só rejeitasse, um aumento real ficaria bloqueado para sempre. Por
+isso o mesmo preço, visto de novo na coleta seguinte, é aceito.
 
-**SQLite.** O historico comecou em CSV. O SQLite continua sendo um arquivo so, sem
-servidor, mas da consultas SQL (ultimo preco de cada produto com `GROUP BY`), tipos de
-dados e colunas novas sem quebrar o arquivo. O cadastro de produtos continua em CSV
-porque e editado a mao no Excel. Colunas novas sao acrescentadas por uma migracao
-automatica (`ALTER TABLE`), sem perder dados.
+**EAN validado pelo dígito verificador.** Uma das lojas preenchia o campo `gtin` do
+produto com o código interno do SKU, e todas as medidas de uma telha ficavam com o
+mesmo "EAN". Agora o monitor procura o EAN da variação primeiro e só aceita códigos
+com dígito verificador válido.
 
-**Comparacao entre lojas: EAN automatico + grupo manual.** O EAN (codigo de barras) casa
-sozinho o mesmo produto em lojas diferentes. Mas produtos equivalentes de marcas
-diferentes (ex.: o mesmo ferro CA50 10mm de outro fabricante) tem EANs diferentes e
-tambem interessam na comparacao. Para esses, a coluna opcional `grupo` do cadastro da
-o mesmo codigo aos equivalentes. Quando existe, o grupo tem prioridade sobre o EAN.
+**Comparação entre lojas: EAN automático + grupo manual.** O EAN casa sozinho o mesmo
+produto em lojas diferentes. Mas produtos equivalentes de marcas diferentes (ex.: o
+mesmo vergalhão CA50 10mm de outra usina) têm EANs diferentes e também interessam. Para
+esses, a coluna `grupo` do cadastro dá o mesmo código aos equivalentes. A diferença de
+preço compara **lojas**: a opção mais barata de cada uma.
 
-**Relatorio em um arquivo so, mas editavel.** O CSS e o JavaScript ficam em arquivos
-proprios (`src/relatorio/`), faceis de editar, e sao copiados para dentro do HTML na hora
-de gerar. Assim o relatorio pode ser enviado sozinho (e-mail, WhatsApp) sem perder o
-visual. O HTML de cada aba e montado no Python, o que permite testa-lo com pytest; o
-JavaScript cuida so da interacao (abas, filtros, ordenacao).
+**SQLite.** O histórico começou em CSV. O SQLite continua sendo um arquivo só, sem
+servidor, mas dá consultas SQL (último preço de cada produto com `GROUP BY`), tipos de
+dados e colunas novas sem quebrar o arquivo, com uma migração automática (`ALTER
+TABLE`). O cadastro continua em CSV porque é editado à mão no Excel.
 
-**Testes sem internet.** As paginas de teste sao sinteticas e o `requests.get` e
-trocado por um site falso (`monkeypatch`). Os testes sao rapidos, repetiveis e nao
-incomodam o site.
+**Relatório em um arquivo só, mas editável.** O CSS e o JavaScript ficam em arquivos
+próprios e são copiados para dentro do HTML na hora de gerar. Assim o relatório pode
+ser enviado sozinho (e-mail, WhatsApp) sem perder o visual. O HTML de cada aba é
+montado no Python, o que permite testá-lo com pytest; o gráfico é um SVG calculado no
+próprio Python, sem biblioteca.
 
-**Coleta educada.** Pausa entre requisicoes, uma unica tentativa extra, execucao uma
-vez por dia e respeito ao `robots.txt` seguindo a RFC 9309 (sem robots.txt, tudo
-permitido; servidor com erro, nada e acessado).
+**Testes sem internet.** As páginas de teste são sintéticas e o `requests.get` é
+trocado por um site falso (`monkeypatch`). Os testes são rápidos, repetíveis e não
+incomodam os sites.
 
-**Dados reais fora do repositorio.** O cadastro real mostra quais produtos sao
-monitorados, uma informacao comercial. Ele, o banco e o relatorio ficam fora do Git; no
-repositorio ha so um modelo (`produtos.exemplo.csv`) e paginas de teste ficticias.
+**Dados reais fora do repositório.** O cadastro real mostra quais produtos são
+monitorados, uma informação comercial. Ele, o banco e os relatórios ficam fora do Git;
+no repositório há só um modelo de cadastro, páginas de teste e uma demonstração com
+dados fictícios.
 
-## Limitacoes conhecidas
+## Coleta responsável
 
-- Paginas incompletas do site: alguns produtos podem ficar sem coleta em certos dias.
-- O `robotparser` do Python nao entende curingas (`*`) no meio das regras do
-  robots.txt; nesses casos a regra e tratada como texto comum.
-- O EAN vem do `gtin` da oferta no JSON-LD, senao dos dados VTEX da variacao, senao do
-  `gtin` do produto. So e aceito com digito verificador valido (algumas lojas colocam
-  o codigo do SKU nesse campo). Sem EAN, o produto so entra no comparativo pelo `grupo`.
-- Em lojas Shopify, produtos com varias variacoes (`?variant=`) ainda nao sao tratados:
-  o monitor registra "SKU ambiguo".
-- A coleta agendada depende do computador ligado (se estiver desligado as 9h, roda
+- Respeita o `robots.txt` seguindo a RFC 9309, com uma regra mais cuidadosa: se o
+  próprio `robots.txt` responde 401 ou 403, o site é tratado como bloqueado.
+- Pausa entre os acessos, uma única tentativa extra e uma execução por dia.
+- Só acessa as páginas dos produtos cadastrados.
+- **Não contorna proteções anti-robô.** Dois concorrentes que eu queria monitorar
+  bloqueiam acessos automáticos (CAPTCHA). Eles ficaram de fora: o monitor detecta o
+  bloqueio e não acessa o site, em vez de disfarçar o programa de navegador.
+
+## Limitações conhecidas
+
+- Páginas incompletas do site: alguns produtos podem ficar sem coleta em certos dias.
+- O `robotparser` do Python não entende curingas (`*`) no meio das regras do
+  robots.txt; nesses casos a regra é tratada como texto comum.
+- Em lojas Shopify, produtos com várias variações (`?variant=`) ainda não são tratados:
+  o monitor registra "SKU ambíguo".
+- A coleta agendada depende do computador ligado (se estiver desligado às 9h, roda
   assim que for ligado).
 
 ## Roadmap
 
-- **v1 (concluida):** 1 site, execucao manual.
-  - [x] Coleta com tratamento de erros e historico
-  - [x] Relatorio HTML
-  - [x] Testes automatizados com paginas HTML sinteticas (sem acessar o site)
-  - [x] Extracao via dados estruturados da pagina (JSON-LD / schema.org)
-  - [x] Validacao dos dados (preco vazio ou variacao absurda gera alerta)
-  - [x] Historico em SQLite
-- **v2 (em andamento):**
-  - [x] Execucao agendada diaria (Agendador de Tarefas do Windows)
-  - [x] Respeito automatico ao robots.txt
-  - [x] Guardar o EAN dos produtos
-  - [x] Testes automaticos no GitHub Actions
-  - [x] Comparativo entre lojas no relatorio (EAN + grupo de equivalencia)
-  - [ ] Mais concorrentes
-- **v3:** painel com graficos e alertas de mudanca de preco (Telegram/e-mail).
+- **v1 (concluída):** 1 site, execução manual.
+  - [x] Coleta com tratamento de erros e histórico
+  - [x] Relatório HTML
+  - [x] Testes automatizados com páginas HTML sintéticas (sem acessar o site)
+  - [x] Extração via dados estruturados da página (JSON-LD / schema.org)
+  - [x] Validação dos dados (preço vazio ou variação absurda gera alerta)
+  - [x] Histórico em SQLite
+- **v2 (concluída):**
+  - [x] Execução agendada diária (Agendador de Tarefas do Windows)
+  - [x] Respeito automático ao robots.txt
+  - [x] EAN dos produtos, validado pelo dígito verificador
+  - [x] Testes automáticos no GitHub Actions
+  - [x] Segundo concorrente (outra plataforma, mesmo extrator)
+  - [x] Comparativo entre lojas no relatório (EAN + grupo de equivalência)
+  - [x] Relatório com abas, gráfico de histórico e modo demonstração
+- **v3:** alertas de mudança de preço por Telegram/e-mail.
 
 ## Tecnologias
 
-Python, requests, BeautifulSoup, SQLite (SQL), pytest, GitHub Actions, HTML/CSS/JavaScript.
+Python, requests, BeautifulSoup, SQLite (SQL), pytest, GitHub Actions,
+HTML/CSS/JavaScript, SVG.
+
+## Licença
+
+[MIT](LICENSE)
