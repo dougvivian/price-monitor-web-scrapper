@@ -54,6 +54,19 @@ CREATE TABLE IF NOT EXISTS alertas (
     data_alerta TEXT NOT NULL
 );
 
+-- Cada vez que a coleta roda, registramos uma "execucao": quando comecou, quando
+-- terminou e o resumo. Assim o relatorio sabe o que aconteceu na ultima coleta.
+-- Se "fim" ficar vazio (NULL), a coleta foi interrompida no meio.
+CREATE TABLE IF NOT EXISTS execucoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inicio TEXT NOT NULL,
+    fim TEXT,
+    produtos INTEGER,
+    coletados INTEGER,
+    erros INTEGER,
+    alertas INTEGER
+);
+
 -- Um indice funciona como o indice de um livro: deixa rapida a busca por produto,
 -- mesmo quando a tabela tiver milhares de coletas.
 CREATE INDEX IF NOT EXISTS idx_coletas_produto ON coletas (produto_id);
@@ -170,9 +183,38 @@ def salvar_alerta(conexao, alerta):
     conexao.commit()
 
 
+def iniciar_execucao(conexao, inicio):
+    cursor = conexao.execute("INSERT INTO execucoes (inicio) VALUES (?)", (inicio,))
+    conexao.commit()
+
+    # lastrowid e o id que o banco acabou de gerar para a linha inserida.
+    # Guardamos esse numero para atualizar a mesma linha no fim da coleta.
+    return cursor.lastrowid
+
+
+def finalizar_execucao(conexao, execucao_id, fim, produtos, resultados):
+    # resultados e o contador do main(): {"coletado": 54, "erro": 5, "alerta": 0}
+    conexao.execute(
+        """
+        UPDATE execucoes
+        SET fim = ?, produtos = ?, coletados = ?, erros = ?, alertas = ?
+        WHERE id = ?
+        """,
+        (fim, produtos, resultados["coletado"], resultados["erro"], resultados["alerta"], execucao_id),
+    )
+    conexao.commit()
+
+
 # ---------------------------------------------------------------------------
 # Consultas
 # ---------------------------------------------------------------------------
+
+def buscar_ultima_execucao(conexao):
+    # A execucao mais recente (maior id), ou None se a coleta nunca rodou.
+    # LIMIT 1 pede so a primeira linha do resultado.
+    linha = conexao.execute("SELECT * FROM execucoes ORDER BY id DESC LIMIT 1").fetchone()
+    return dict(linha) if linha is not None else None
+
 
 def buscar_ultimos_precos(conexao):
     # Ultimo preco salvo de cada produto, ignorando coletas sem preco (indisponivel).

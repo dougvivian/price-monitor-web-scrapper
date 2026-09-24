@@ -36,6 +36,12 @@ AGENTE_ROBOTS = "*"
 DISPONIVEL_SCHEMA = "InStock"
 
 
+def agora():
+    # Data e hora atuais no formato usado em todo o projeto: "2026-09-24 11:47:38".
+    # Esse formato (ano-mes-dia) tem uma vantagem: ordenar o texto ja ordena as datas.
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def ler_cadastro():
     # Le todas as linhas do cadastro de produtos (ativas ou nao).
     with open(ARQUIVO_PRODUTOS, "r", newline="", encoding="utf-8") as arquivo_csv:
@@ -261,7 +267,7 @@ def extrair_dados_produto(html, produto):
     preco_numero = float(preco) if preco not in (None, "") else None
 
     # Registramos a data e hora em que o nosso programa viu este produto.
-    data_coleta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data_coleta = agora()
 
     # Um dicionario guarda os dados em pares de chave e valor.
     dados_produto = {
@@ -345,7 +351,7 @@ def criar_alerta(produto, preco_anterior, preco_novo):
         "preco_novo": preco_novo,
         # round(..., 1) arredonda para 1 casa decimal. Ex.: 0.61234 -> 61.2 (%).
         "variacao_percentual": round(calcular_variacao(preco_anterior, preco_novo) * 100, 1),
-        "data_alerta": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "data_alerta": agora(),
     }
 
 
@@ -356,7 +362,7 @@ def criar_erro(produto, tipo_erro, mensagem):
         "url": produto["url"],
         "tipo_erro": tipo_erro,
         "mensagem": mensagem,
-        "data_erro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "data_erro": agora(),
     }
 
 
@@ -506,6 +512,10 @@ def main():
 
     # try/finally garante que o banco sera fechado mesmo se der erro no meio.
     try:
+        # Registramos o inicio desta coleta (o relatorio usa isso para saber
+        # quais erros aconteceram na coleta mais recente).
+        execucao_id = banco.iniciar_execucao(conexao, agora())
+
         # Lemos do banco uma vez so, no comeco, os dados usados na validacao.
         ultimos_precos = banco.buscar_ultimos_precos(conexao)
         ultimos_alertas = banco.buscar_ultimos_alertas(conexao)
@@ -517,6 +527,9 @@ def main():
 
             # Fazemos uma pausa para nao enviar muitas requisicoes seguidas ao site.
             sleep(1)
+
+        # So chega aqui se a coleta terminou; se quebrar no meio, o "fim" fica vazio no banco.
+        banco.finalizar_execucao(conexao, execucao_id, agora(), len(produtos), resultados)
     finally:
         conexao.close()
 

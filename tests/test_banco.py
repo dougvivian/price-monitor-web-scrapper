@@ -139,3 +139,17 @@ def test_banco_antigo_sem_coluna_ean_e_atualizado_sem_perder_dados(tmp_path):
     assert len(coletas) == 1                 # a coleta antiga continua la
     assert coletas[0]["preco"] == 61.9
     assert coletas[0]["ean"] is None         # coluna nova, vazia nas linhas antigas
+
+
+def test_execucao_registra_inicio_fim_e_resumo(conexao):
+    assert banco.buscar_ultima_execucao(conexao) is None
+
+    execucao_id = banco.iniciar_execucao(conexao, "2026-09-24 09:00:00")
+    em_andamento = banco.buscar_ultima_execucao(conexao)
+    banco.finalizar_execucao(conexao, execucao_id, "2026-09-24 09:04:00", 59,
+                             {"coletado": 54, "erro": 5, "alerta": 0})
+    finalizada = banco.buscar_ultima_execucao(conexao)
+
+    assert em_andamento["fim"] is None
+    assert finalizada["fim"] == "2026-09-24 09:04:00"
+    assert (finalizada["produtos"], finalizada["coletados"], finalizada["erros"], finalizada["alertas"]) == (59, 54, 5, 0)

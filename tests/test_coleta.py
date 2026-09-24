@@ -266,3 +266,16 @@ def test_pagina_completa_nao_e_baixada_de_novo(tmp_path, monkeypatch):
     main.main()
 
     assert site.acessos == 1
+
+
+def test_coleta_registra_a_execucao_no_banco(tmp_path, monkeypatch):
+    arquivo_banco = preparar_ambiente(tmp_path, monkeypatch, preco_anterior=80.0)
+
+    main.main()
+
+    conexao = banco.conectar(arquivo_banco)
+    execucao = banco.buscar_ultima_execucao(conexao)
+    conexao.close()
+
+    assert execucao["fim"] is not None
+    assert (execucao["produtos"], execucao["coletados"], execucao["erros"], execucao["alertas"]) == (1, 1, 0, 0)
