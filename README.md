@@ -12,15 +12,16 @@ produto por produto. O projeto tambem e um estudo de automacao, coleta e tratame
 - Le a lista de produtos a monitorar em `dados/produtos.csv`.
 - Acessa a pagina de cada produto e extrai nome, preco e disponibilidade dos
   dados estruturados da pagina (JSON-LD).
-- Salva cada coleta em `dados/coletas.csv`, montando um historico de precos.
-- Registra falhas (site fora do ar, preco nao encontrado etc.) em `dados/erros.csv`,
+- Salva cada coleta em um banco de dados SQLite (`dados/monitor.db`), montando um
+  historico de precos.
+- Registra falhas (site fora do ar, preco nao encontrado etc.) na tabela `erros`,
   sem interromper a coleta dos outros produtos.
 - Valida cada preco antes de salvar: se ele variar mais de 50% em relacao a ultima
-  coleta do produto, vira um alerta em `dados/alertas.csv` e nao entra no historico.
+  coleta do produto, vira um registro na tabela `alertas` e nao entra no historico.
   Se o mesmo preco aparecer de novo na coleta seguinte, ele e considerado confirmado e
   e salvo (assim um aumento real nao fica bloqueado para sempre).
-- Gera `relatorios/relatorio.html` com o ultimo preco de cada produto, historico,
-  busca e filtro por disponibilidade.
+- Gera `relatorios/relatorio.html` com os alertas de variacao de preco, o ultimo preco
+  de cada produto, historico, busca e filtro por disponibilidade.
 
 Concorrente suportado no momento: **Loja A**.
 
@@ -35,7 +36,7 @@ pip install -r requirements.txt
 # 2. Coletar os precos (acessa o site dos concorrentes)
 python src/main.py
 
-# 3. Gerar o relatorio HTML a partir das coletas salvas
+# 3. Gerar o relatorio HTML a partir do banco de dados
 python src/gerar_relatorio.py
 ```
 
@@ -53,20 +54,22 @@ Os testes usam paginas HTML salvas em `tests/paginas/` e nao acessam a internet.
 
 ```text
 src/
-  main.py              coleta os precos
+  main.py              coleta os precos e valida as variacoes
+  banco.py             acesso ao banco SQLite (todo o SQL do projeto fica aqui)
   gerar_relatorio.py   gera o relatorio HTML
 dados/
   produtos.csv         cadastro dos produtos monitorados (editavel no Excel)
                        colunas: produto_id, concorrente, url, sku, ativo, categoria, observacao
-  coletas.csv          historico de precos coletados
-  erros.csv            falhas de coleta
-  alertas.csv          precos com variacao acima de 50% (nao salvos no historico)
+  monitor.db           banco SQLite, criado na primeira coleta (fora do Git)
+                       tabelas: coletas, erros, alertas
 relatorios/
   relatorio.html       relatorio gerado
 tests/
   test_extracao.py     testes da extracao de dados da pagina
   test_validacao.py    testes das regras de validacao de preco
   test_coleta.py       teste do fluxo completo, sem acessar o site
+  test_banco.py        testes das consultas SQL (banco em memoria)
+  test_relatorio.py    testes do relatorio HTML
   paginas/             paginas HTML salvas usadas nos testes
 aprendizado.md         diario do desenvolvimento e conceitos aprendidos
 ```
@@ -112,10 +115,10 @@ existir, o nome vem do JSON-LD.
   - [x] Testes automatizados com paginas HTML salvas (sem acessar o site)
   - [x] Extracao via dados estruturados da pagina (JSON-LD / schema.org)
   - [x] Validacao dos dados (preco vazio ou variacao absurda gera alerta)
-  - [ ] Historico em SQLite
+  - [x] Historico em SQLite
 - **v2:** mais concorrentes, produtos casados entre lojas pelo EAN, execucao agendada diaria.
 - **v3:** painel com graficos e alertas de mudanca de preco (Telegram/e-mail).
 
 ## Tecnologias
 
-Python, requests, BeautifulSoup, CSV, HTML/CSS/JavaScript.
+Python, requests, BeautifulSoup, SQLite (SQL), pytest, HTML/CSS/JavaScript.
