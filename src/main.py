@@ -268,6 +268,10 @@ def extrair_dados_produto(html, produto):
         "produto_id": produto["produto_id"],
         "concorrente": produto["concorrente"],
         "produto_nome": titulo,
+        # EAN = codigo de barras do produto. Vem dos dados VTEX da variacao (o JSON-LD
+        # dessas lojas nao traz). Vai servir para casar o mesmo produto entre lojas.
+        # Se a pagina nao tiver os dados VTEX, fica vazio.
+        "ean": str(variacao.get("ean") or "").strip(),
         "preco_texto": "",
         "preco_numero": "",
         "status_produto": "",

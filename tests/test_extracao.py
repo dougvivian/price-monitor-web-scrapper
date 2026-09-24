@@ -238,3 +238,29 @@ def test_qualquer_disponibilidade_diferente_de_instock_fica_indisponivel(disponi
 
     assert dados["status_produto"] == "indisponivel"
     assert dados["mensagem"].startswith(disponibilidade)
+
+
+def test_ean_da_variacao_vem_dos_dados_vtex():
+    html = ler_pagina("produto_variacao_sku.html")
+    url = "https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm/p?skuId=10000103"
+
+    dados = extrair_dados_produto(html, criar_produto(url=url))
+
+    # Cada variacao tem o seu proprio EAN: este e o da 2,13 x 1,10m.
+    assert dados["ean"] == "7890000000035"
+
+
+def test_ean_de_produto_indisponivel_tambem_e_guardado():
+    dados = extrair_dados_produto(ler_pagina("produto_indisponivel.html"), criar_produto())
+
+    assert dados["ean"] == "7890000000202"
+
+
+def test_sem_dados_vtex_o_ean_fica_vazio():
+    html = montar_html(montar_produto_json(
+        {"@type": "Offer", "price": 10, "availability": "http://schema.org/InStock"}
+    ))
+
+    dados = extrair_dados_produto(html, criar_produto())
+
+    assert dados["ean"] == ""

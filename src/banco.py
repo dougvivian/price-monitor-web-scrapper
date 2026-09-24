@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS coletas (
     produto_id TEXT NOT NULL,
     concorrente TEXT NOT NULL,
     produto_nome TEXT NOT NULL,
+    ean TEXT,
     preco REAL,
     status_produto TEXT NOT NULL,
     mensagem TEXT,
@@ -69,8 +70,24 @@ def conectar(caminho_banco):
 
     # executescript roda varios comandos SQL de uma vez.
     conexao.executescript(CRIAR_TABELAS)
+    atualizar_tabelas(conexao)
 
     return conexao
+
+
+def atualizar_tabelas(conexao):
+    # "CREATE TABLE IF NOT EXISTS" nao mexe numa tabela que ja existe. Entao, quando uma
+    # versao nova do programa precisa de uma coluna nova, um banco criado antes nao a tem.
+    # Aqui conferimos as colunas e acrescentamos as que faltam, SEM apagar os dados.
+    # (Isso se chama "migracao" do banco de dados.)
+
+    # PRAGMA table_info lista as colunas de uma tabela; a chave "name" e o nome da coluna.
+    colunas_coletas = [coluna["name"] for coluna in conexao.execute("PRAGMA table_info(coletas)")]
+
+    if "ean" not in colunas_coletas:
+        # ALTER TABLE ... ADD COLUMN acrescenta a coluna; as linhas antigas ficam com NULL nela.
+        conexao.execute("ALTER TABLE coletas ADD COLUMN ean TEXT")
+        conexao.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -90,16 +107,21 @@ def salvar_coleta(conexao, dados_produto):
     if preco == "":
         preco = None
 
+    # Mesmo cuidado com o EAN. Usamos get() porque nem todo dicionario de coleta
+    # precisa trazer o EAN (ex.: coletas montadas nos testes).
+    ean = dados_produto.get("ean") or None
+
     conexao.execute(
         """
         INSERT INTO coletas
-            (produto_id, concorrente, produto_nome, preco, status_produto, mensagem, url, data_coleta)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (produto_id, concorrente, produto_nome, ean, preco, status_produto, mensagem, url, data_coleta)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             dados_produto["produto_id"],
             dados_produto["concorrente"],
             dados_produto["produto_nome"],
+            ean,
             preco,
             dados_produto["status_produto"],
             dados_produto["mensagem"],

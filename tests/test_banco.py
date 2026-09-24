@@ -97,3 +97,45 @@ def test_texto_com_aspas_e_gravado_sem_quebrar_o_sql(conexao):
     banco.salvar_coleta(conexao, coleta)
 
     assert banco.listar_coletas(conexao)[0]["produto_nome"] == nome_perigoso
+
+
+def test_ean_e_gravado_e_vazio_vira_null(conexao):
+    com_ean = criar_coleta("PRD-001", 10.0)
+    com_ean["ean"] = "7890000000035"
+    sem_ean = criar_coleta("PRD-002", 20.0)
+    sem_ean["ean"] = ""
+
+    banco.salvar_coleta(conexao, com_ean)
+    banco.salvar_coleta(conexao, sem_ean)
+
+    coletas = banco.listar_coletas(conexao)
+    assert coletas[0]["ean"] == "7890000000035"
+    assert coletas[1]["ean"] is None
+
+
+def test_banco_antigo_sem_coluna_ean_e_atualizado_sem_perder_dados(tmp_path):
+    # Simula um banco criado pela versao anterior do programa, sem a coluna ean.
+    import sqlite3
+
+    arquivo_banco = tmp_path / "antigo.db"
+    antigo = sqlite3.connect(arquivo_banco)
+    antigo.execute(
+        "CREATE TABLE coletas (id INTEGER PRIMARY KEY AUTOINCREMENT, produto_id TEXT NOT NULL,"
+        " concorrente TEXT NOT NULL, produto_nome TEXT NOT NULL, preco REAL,"
+        " status_produto TEXT NOT NULL, mensagem TEXT, url TEXT NOT NULL, data_coleta TEXT NOT NULL)"
+    )
+    antigo.execute(
+        "INSERT INTO coletas (produto_id, concorrente, produto_nome, preco, status_produto, url, data_coleta)"
+        " VALUES ('PRD-001', 'Loja A', 'Telha', 61.9, 'disponivel', 'https://exemplo.com/p', '2026-09-24 10:00:00')"
+    )
+    antigo.commit()
+    antigo.close()
+
+    # Abrir com o banco.py novo faz a migracao.
+    conexao = banco.conectar(arquivo_banco)
+    coletas = banco.listar_coletas(conexao)
+    conexao.close()
+
+    assert len(coletas) == 1                 # a coleta antiga continua la
+    assert coletas[0]["preco"] == 61.9
+    assert coletas[0]["ean"] is None         # coluna nova, vazia nas linhas antigas
