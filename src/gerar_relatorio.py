@@ -455,4 +455,7 @@ def main():
     print("Relatorio gerado:", ARQUIVO_RELATORIO)
 
 
-main()
+# So gera o relatorio quando rodamos "python src/gerar_relatorio.py" diretamente.
+# Se este arquivo for importado (por exemplo, em um teste), nada e executado sozinho.
+if __name__ == "__main__":
+    main()

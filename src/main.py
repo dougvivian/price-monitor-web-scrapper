@@ -172,48 +172,60 @@ def criar_erro(produto, tipo_erro, mensagem):
     }
 
 
-produtos = ler_produtos()
-dados_coletados = []
-erros_coleta = []
+# A funcao main junta o passo a passo da coleta.
+# Antes esse codigo ficava solto no arquivo e rodava sempre que o arquivo era aberto,
+# inclusive quando outro arquivo (como um teste) so queria importar uma funcao daqui.
+def main():
+    produtos = ler_produtos()
+    dados_coletados = []
+    erros_coleta = []
 
-for produto in produtos:
-    try:
-        resposta = requests.get(produto["url"], timeout=8)
+    for produto in produtos:
+        try:
+            resposta = requests.get(produto["url"], timeout=8)
 
-        if resposta.status_code != 200:
-            erro_coleta = criar_erro(
-                produto,
-                "status_http",
-                f"Status HTTP inesperado: {resposta.status_code}",
-            )
+            if resposta.status_code != 200:
+                erro_coleta = criar_erro(
+                    produto,
+                    "status_http",
+                    f"Status HTTP inesperado: {resposta.status_code}",
+                )
+                erros_coleta.append(erro_coleta)
+                salvar_erros([erro_coleta])
+                sleep(1)
+                continue
+
+            dados_produto = extrair_dados_produto(resposta.text, produto)
+            dados_coletados.append(dados_produto)
+            salvar_coletas([dados_produto])
+
+        except requests.RequestException as erro:
+            erro_coleta = criar_erro(produto, "requisicao", str(erro))
             erros_coleta.append(erro_coleta)
             salvar_erros([erro_coleta])
-            sleep(1)
-            continue
 
-        dados_produto = extrair_dados_produto(resposta.text, produto)
-        dados_coletados.append(dados_produto)
-        salvar_coletas([dados_produto])
+        except ValueError as erro:
+            erro_coleta = criar_erro(produto, "extracao", str(erro))
+            erros_coleta.append(erro_coleta)
+            salvar_erros([erro_coleta])
 
-    except requests.RequestException as erro:
-        erro_coleta = criar_erro(produto, "requisicao", str(erro))
-        erros_coleta.append(erro_coleta)
-        salvar_erros([erro_coleta])
+        except Exception as erro:
+            erro_coleta = criar_erro(produto, "erro_inesperado", str(erro))
+            erros_coleta.append(erro_coleta)
+            salvar_erros([erro_coleta])
 
-    except ValueError as erro:
-        erro_coleta = criar_erro(produto, "extracao", str(erro))
-        erros_coleta.append(erro_coleta)
-        salvar_erros([erro_coleta])
+        # Fazemos uma pausa para nao enviar muitas requisicoes seguidas ao site.
+        sleep(1)
 
-    except Exception as erro:
-        erro_coleta = criar_erro(produto, "erro_inesperado", str(erro))
-        erros_coleta.append(erro_coleta)
-        salvar_erros([erro_coleta])
+    print("Resumo da coleta")
+    print("Produtos ativos:", len(produtos))
+    print("Produtos atualizados:", len(dados_coletados))
+    print("Produtos com erro:", len(erros_coleta))
 
-    # Fazemos uma pausa para nao enviar muitas requisicoes seguidas ao site.
-    sleep(1)
 
-print("Resumo da coleta")
-print("Produtos ativos:", len(produtos))
-print("Produtos atualizados:", len(dados_coletados))
-print("Produtos com erro:", len(erros_coleta))
+# Quando rodamos "python src/main.py", o Python coloca o valor "__main__" em __name__,
+# entao a coleta comeca.
+# Quando outro arquivo faz "import main", __name__ vale "main" e a coleta NAO roda.
+# Assim conseguimos testar as funcoes sem acessar o site.
+if __name__ == "__main__":
+    main()

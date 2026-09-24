@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# Configuracoes pessoais do Claude Code (nao vao para o GitHub)
+.claude/settings.local.json
+CLAUDE.local.md
