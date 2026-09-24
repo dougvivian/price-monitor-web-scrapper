@@ -87,10 +87,15 @@ O monitor escolhe a oferta certa assim:
 Produto fora de estoque fica como `indisponivel`, sem preco; o preco anunciado vai
 para a mensagem, para consulta.
 
+Em lojas da plataforma VTEX (como a Loja A), a pagina tambem traz um objeto
+`__STATE__` com os dados de cada variacao. O monitor usa esse objeto como complemento,
+para pegar o nome completo da variacao (ex.: `Telha ... 2,13 x 1,10m`). Se ele nao
+existir, o nome vem do JSON-LD.
+
 ## Limitacoes conhecidas
 
-- O JSON-LD da Loja A nao traz o EAN do produto, necessario para casar produtos
-  entre lojas (v2).
+- O EAN (codigo de barras), necessario para casar produtos entre lojas na v2, nao vem
+  no JSON-LD da Loja A. Ele existe nos dados VTEX da pagina, mas ainda nao e salvo.
 
 ## Roadmap
 

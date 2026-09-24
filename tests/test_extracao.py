@@ -47,7 +47,8 @@ def test_variacao_usa_preco_do_sku_da_url():
     assert dados["status_produto"] == "disponivel"
     assert dados["preco_numero"] == 87.9
     assert dados["preco_texto"] == "R$87,90"
-    assert dados["produto_nome"] == "Telha Fibrocimento Ondulada 6mm Cinza Marca"
+    # O nome vem da variacao (dados VTEX), com a medida no final.
+    assert dados["produto_nome"] == "Telha Fibrocimento Ondulada 6mm Cinza Marca 2,13 x 1,10m"
 
 
 def test_sku_da_coluna_tem_prioridade_sobre_o_link():
@@ -76,7 +77,7 @@ def test_varias_ofertas_com_sku_na_coluna():
 
     assert dados["status_produto"] == "disponivel"
     assert dados["preco_numero"] == 25.9
-    assert dados["produto_nome"] == "Telha de Fibrocimento Ondulada Marca Marca Cinza 4mm"
+    assert dados["produto_nome"] == "Telha de Fibrocimento Ondulada Marca Marca Cinza 4mm 2,44m x 50cm"
 
 
 def test_sku_inexistente_gera_erro():
@@ -98,6 +99,7 @@ def test_produto_fora_de_estoque_fica_indisponivel_sem_preco():
     assert dados["preco_texto"] == ""
     assert dados["preco_numero"] == ""
     assert dados["mensagem"] == "OutOfStock (preco anunciado: R$229,90)"
+    assert dados["produto_nome"] == "Placa Cimentícia 6mm Cinza Marca 1,20 x 3m Peça"
 
 
 def test_sku_com_zero_a_esquerda():
@@ -146,6 +148,8 @@ def test_oferta_unica_sem_aggregate_offer():
 
     assert dados["preco_numero"] == 10.5
     assert dados["preco_texto"] == "R$10,50"
+    # Sem os dados VTEX na pagina, o nome vem do JSON-LD.
+    assert dados["produto_nome"] == "Produto teste"
 
 
 def test_preco_como_texto():
@@ -157,6 +161,31 @@ def test_preco_como_texto():
     dados = extrair_dados_produto(html, criar_produto())
 
     assert dados["preco_numero"] == 1234.56
+
+
+def test_nome_da_variacao_vem_dos_dados_vtex():
+    # Pagina com JSON-LD (2 ofertas) e o __STATE__ da VTEX com o nome de cada variacao.
+    json_ld = montar_produto_json(
+        {
+            "@type": "AggregateOffer",
+            "offers": [
+                {"@type": "Offer", "sku": "111", "price": 10, "availability": "http://schema.org/InStock"},
+                {"@type": "Offer", "sku": "222", "price": 20, "availability": "http://schema.org/InStock"},
+            ],
+        },
+        nome="Telha",
+    )
+    estado_vtex = {
+        "Product:telha.items.0": {"itemId": "111", "nameComplete": "Telha 1,22m"},
+        "Product:telha.items.1": {"itemId": "222", "nameComplete": "Telha 2,44m"},
+    }
+    script_vtex = f"<script>window.x = 1; __STATE__ = {json.dumps(estado_vtex)}; outraCoisa()</script>"
+    html = montar_html(json_ld).replace("</head>", script_vtex + "</head>")
+
+    dados = extrair_dados_produto(html, criar_produto(sku="222"))
+
+    assert dados["produto_nome"] == "Telha 2,44m"
+    assert dados["preco_numero"] == 20
 
 
 def test_pagina_sem_json_ld_gera_erro():

@@ -64,6 +64,43 @@ def ler_json_ld_produto(soup):
     raise ValueError("JSON-LD do produto nao encontrado na pagina.")
 
 
+def ler_variacoes_vtex(soup):
+    # Lojas feitas na plataforma VTEX (caso da Loja A) guardam na pagina um objeto
+    # chamado __STATE__, com os dados de cada variacao (SKU): nome completo, medida, EAN...
+    # Ele NAO e padrao schema.org (so existe em lojas VTEX), entao usamos apenas como
+    # complemento do JSON-LD: se nao existir, seguimos sem ele.
+    marcador = "__STATE__ ="
+
+    for tag_script in soup.find_all("script"):
+        texto_script = tag_script.string or ""
+
+        if marcador not in texto_script:
+            continue
+
+        # O script tem o formato:  __STATE__ = {...json...}
+        # Pegamos o texto logo depois do "=".
+        inicio_json = texto_script.index(marcador) + len(marcador)
+
+        try:
+            # raw_decode le um objeto JSON do comeco do texto e ignora o que vier depois.
+            estado, _ = json.JSONDecoder().raw_decode(texto_script[inicio_json:].lstrip())
+        except json.JSONDecodeError:
+            return {}
+
+        # Cada variacao aparece como um dicionario com a chave "itemId" (o SKU).
+        # Montamos um dicionario SKU -> dados da variacao.
+        # Tiramos os zeros a esquerda da chave, pelo mesmo motivo da funcao mesmo_sku.
+        variacoes = {}
+
+        for valor in estado.values():
+            if isinstance(valor, dict) and "itemId" in valor:
+                variacoes[str(valor["itemId"]).lstrip("0")] = valor
+
+        return variacoes
+
+    return {}
+
+
 def listar_ofertas(json_produto):
     # Em "offers" a loja informa preco e disponibilidade. Pode vir de tres jeitos:
     #   - uma oferta so:        {"@type": "Offer", "price": 26.9, ...}
@@ -144,7 +181,14 @@ def extrair_dados_produto(html, produto):
     ofertas = listar_ofertas(json_produto)
     oferta = escolher_oferta(ofertas, descobrir_sku(produto))
 
-    titulo = (json_produto.get("name") or "").strip()
+    # O "name" do JSON-LD e o nome do produto "pai", sem a medida da variacao
+    # (ex.: "Telha Fibrocimento Ondulada 6mm Cinza Marca").
+    # Se a pagina tiver os dados VTEX, usamos o nome completo da variacao escolhida
+    # (ex.: "Telha Fibrocimento Ondulada 6mm Cinza Marca 2,13 x 1,10m").
+    variacoes = ler_variacoes_vtex(soup)
+    variacao = variacoes.get(str(oferta.get("sku", "")).lstrip("0"), {})
+
+    titulo = (variacao.get("nameComplete") or json_produto.get("name") or "").strip()
 
     if titulo == "":
         raise ValueError("Nome do produto nao encontrado no JSON-LD.")
