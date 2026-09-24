@@ -9,12 +9,14 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+import banco
+
 
 PASTA_PROJETO = Path(__file__).resolve().parent.parent
+# O cadastro de produtos continua em CSV, porque e editado a mao no Excel.
 ARQUIVO_PRODUTOS = PASTA_PROJETO / "dados" / "produtos.csv"
-ARQUIVO_COLETAS = PASTA_PROJETO / "dados" / "coletas.csv"
-ARQUIVO_ERROS = PASTA_PROJETO / "dados" / "erros.csv"
-ARQUIVO_ALERTAS = PASTA_PROJETO / "dados" / "alertas.csv"
+# Coletas, erros e alertas sao gravados no banco de dados SQLite (ver banco.py).
+ARQUIVO_BANCO = PASTA_PROJETO / "dados" / "monitor.db"
 
 # Variacao maxima aceita entre o preco novo e o ultimo preco salvo do mesmo produto.
 # 0.5 = 50%. Acima disso o preco vira alerta e nao e salvo no historico.
@@ -248,83 +250,6 @@ def extrair_dados_produto(html, produto):
     return dados_produto
 
 
-def salvar_linhas_csv(caminho_arquivo, campos, linhas):
-    if len(linhas) == 0:
-        return
-
-    arquivo_vazio = not caminho_arquivo.exists() or caminho_arquivo.stat().st_size == 0
-
-    # Usamos "a" para acrescentar novas linhas no historico, sem apagar as anteriores.
-    with open(caminho_arquivo, "a", newline="", encoding="utf-8") as arquivo_csv:
-        escritor_csv = csv.DictWriter(arquivo_csv, fieldnames=campos, delimiter=";")
-
-        if arquivo_vazio:
-            escritor_csv.writeheader()
-
-        escritor_csv.writerows(linhas)
-
-
-def salvar_coletas(dados_coletados):
-    campos = [
-        "produto_id",
-        "concorrente",
-        "produto_nome",
-        "preco_texto",
-        "preco_numero",
-        "status_produto",
-        "mensagem",
-        "url",
-        "data_coleta",
-    ]
-
-    salvar_linhas_csv(ARQUIVO_COLETAS, campos, dados_coletados)
-
-
-def salvar_erros(erros_coleta):
-    campos = [
-        "produto_id",
-        "concorrente",
-        "url",
-        "tipo_erro",
-        "mensagem",
-        "data_erro",
-    ]
-
-    salvar_linhas_csv(ARQUIVO_ERROS, campos, erros_coleta)
-
-
-def ler_csv(caminho_arquivo):
-    # Le um CSV e devolve uma lista de dicionarios (uma linha = um dicionario).
-    # Se o arquivo ainda nao existir, devolve lista vazia.
-    if not caminho_arquivo.exists() or caminho_arquivo.stat().st_size == 0:
-        return []
-
-    with open(caminho_arquivo, "r", newline="", encoding="utf-8") as arquivo_csv:
-        return list(csv.DictReader(arquivo_csv, delimiter=";"))
-
-
-def ler_ultimos_precos():
-    # Monta um dicionario produto_id -> ultimo preco salvo no historico.
-    # Como o coletas.csv esta em ordem de coleta, a ultima linha de cada produto
-    # sobrescreve as anteriores e sobra o preco mais recente.
-    # Linhas sem preco (produto indisponivel) sao ignoradas.
-    ultimos_precos = {}
-
-    for coleta in ler_csv(ARQUIVO_COLETAS):
-        if coleta["preco_numero"] != "":
-            ultimos_precos[coleta["produto_id"]] = float(coleta["preco_numero"])
-
-    return ultimos_precos
-
-
-def ler_ultimos_alertas():
-    # Monta um dicionario produto_id -> preco que gerou o ultimo alerta daquele produto.
-    ultimos_alertas = {}
-
-    for alerta in ler_csv(ARQUIVO_ALERTAS):
-        ultimos_alertas[alerta["produto_id"]] = float(alerta["preco_novo"])
-
-    return ultimos_alertas
 
 
 def calcular_variacao(preco_anterior, preco_novo):
@@ -355,18 +280,8 @@ def validar_preco(preco_anterior, preco_novo, preco_ultimo_alerta):
     return False
 
 
-def salvar_alerta(produto, preco_anterior, preco_novo):
-    campos = [
-        "produto_id",
-        "concorrente",
-        "url",
-        "preco_anterior",
-        "preco_novo",
-        "variacao_percentual",
-        "data_alerta",
-    ]
-
-    alerta = {
+def criar_alerta(produto, preco_anterior, preco_novo):
+    return {
         "produto_id": produto["produto_id"],
         "concorrente": produto["concorrente"],
         "url": produto["url"],
@@ -376,8 +291,6 @@ def salvar_alerta(produto, preco_anterior, preco_novo):
         "variacao_percentual": round(calcular_variacao(preco_anterior, preco_novo) * 100, 1),
         "data_alerta": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
-
-    salvar_linhas_csv(ARQUIVO_ALERTAS, campos, [alerta])
 
 
 def criar_erro(produto, tipo_erro, mensagem):
@@ -391,79 +304,86 @@ def criar_erro(produto, tipo_erro, mensagem):
     }
 
 
+def coletar_produto(conexao, produto, ultimos_precos, ultimos_alertas):
+    # Coleta um produto e grava o resultado no banco.
+    # Devolve "coletado", "alerta" ou "erro", para o resumo final.
+    try:
+        resposta = requests.get(produto["url"], timeout=8)
+
+        if resposta.status_code != 200:
+            banco.salvar_erro(conexao, criar_erro(
+                produto,
+                "status_http",
+                f"Status HTTP inesperado: {resposta.status_code}",
+            ))
+            return "erro"
+
+        dados_produto = extrair_dados_produto(resposta.text, produto)
+
+    except requests.RequestException as erro:
+        banco.salvar_erro(conexao, criar_erro(produto, "requisicao", str(erro)))
+        return "erro"
+
+    except ValueError as erro:
+        banco.salvar_erro(conexao, criar_erro(produto, "extracao", str(erro)))
+        return "erro"
+
+    except Exception as erro:
+        banco.salvar_erro(conexao, criar_erro(produto, "erro_inesperado", str(erro)))
+        return "erro"
+
+    produto_id = produto["produto_id"]
+    preco_novo = dados_produto["preco_numero"]
+
+    # So validamos quando ha preco (produto indisponivel nao tem preco para comparar).
+    preco_valido = preco_novo == "" or validar_preco(
+        ultimos_precos.get(produto_id),
+        preco_novo,
+        ultimos_alertas.get(produto_id),
+    )
+
+    if not preco_valido:
+        # Variacao absurda: registramos o alerta e NAO salvamos no historico.
+        banco.salvar_alerta(conexao, criar_alerta(produto, ultimos_precos[produto_id], preco_novo))
+        return "alerta"
+
+    banco.salvar_coleta(conexao, dados_produto)
+
+    if preco_novo != "":
+        ultimos_precos[produto_id] = preco_novo
+
+    return "coletado"
+
+
 # A funcao main junta o passo a passo da coleta.
-# Antes esse codigo ficava solto no arquivo e rodava sempre que o arquivo era aberto,
-# inclusive quando outro arquivo (como um teste) so queria importar uma funcao daqui.
+# Ela so roda quando o arquivo e executado diretamente (ver o "if" no final do arquivo).
 def main():
     produtos = ler_produtos()
-    dados_coletados = []
-    erros_coleta = []
-    alertas_coleta = []
+    conexao = banco.conectar(ARQUIVO_BANCO)
 
-    # Lemos o historico uma vez so, no comeco, para validar os precos novos.
-    ultimos_precos = ler_ultimos_precos()
-    ultimos_alertas = ler_ultimos_alertas()
+    # Contador de resultados para o resumo final: {"coletado": 50, "erro": 3, ...}
+    resultados = {"coletado": 0, "erro": 0, "alerta": 0}
 
-    for produto in produtos:
-        try:
-            resposta = requests.get(produto["url"], timeout=8)
+    # try/finally garante que o banco sera fechado mesmo se der erro no meio.
+    try:
+        # Lemos do banco uma vez so, no comeco, os dados usados na validacao.
+        ultimos_precos = banco.buscar_ultimos_precos(conexao)
+        ultimos_alertas = banco.buscar_ultimos_alertas(conexao)
 
-            if resposta.status_code != 200:
-                erro_coleta = criar_erro(
-                    produto,
-                    "status_http",
-                    f"Status HTTP inesperado: {resposta.status_code}",
-                )
-                erros_coleta.append(erro_coleta)
-                salvar_erros([erro_coleta])
-                sleep(1)
-                continue
+        for produto in produtos:
+            resultado = coletar_produto(conexao, produto, ultimos_precos, ultimos_alertas)
+            resultados[resultado] += 1
 
-            dados_produto = extrair_dados_produto(resposta.text, produto)
-            produto_id = produto["produto_id"]
-            preco_novo = dados_produto["preco_numero"]
-
-            # So validamos quando ha preco (produto indisponivel nao tem preco para comparar).
-            preco_valido = preco_novo == "" or validar_preco(
-                ultimos_precos.get(produto_id),
-                preco_novo,
-                ultimos_alertas.get(produto_id),
-            )
-
-            if preco_valido:
-                dados_coletados.append(dados_produto)
-                salvar_coletas([dados_produto])
-
-                if preco_novo != "":
-                    ultimos_precos[produto_id] = preco_novo
-            else:
-                # Variacao absurda: registramos o alerta e NAO salvamos no historico.
-                salvar_alerta(produto, ultimos_precos[produto_id], preco_novo)
-                alertas_coleta.append(produto_id)
-
-        except requests.RequestException as erro:
-            erro_coleta = criar_erro(produto, "requisicao", str(erro))
-            erros_coleta.append(erro_coleta)
-            salvar_erros([erro_coleta])
-
-        except ValueError as erro:
-            erro_coleta = criar_erro(produto, "extracao", str(erro))
-            erros_coleta.append(erro_coleta)
-            salvar_erros([erro_coleta])
-
-        except Exception as erro:
-            erro_coleta = criar_erro(produto, "erro_inesperado", str(erro))
-            erros_coleta.append(erro_coleta)
-            salvar_erros([erro_coleta])
-
-        # Fazemos uma pausa para nao enviar muitas requisicoes seguidas ao site.
-        sleep(1)
+            # Fazemos uma pausa para nao enviar muitas requisicoes seguidas ao site.
+            sleep(1)
+    finally:
+        conexao.close()
 
     print("Resumo da coleta")
     print("Produtos ativos:", len(produtos))
-    print("Produtos atualizados:", len(dados_coletados))
-    print("Produtos com erro:", len(erros_coleta))
-    print("Alertas de variacao de preco:", len(alertas_coleta))
+    print("Produtos atualizados:", resultados["coletado"])
+    print("Produtos com erro:", resultados["erro"])
+    print("Alertas de variacao de preco:", resultados["alerta"])
 
 
 # Quando rodamos "python src/main.py", o Python coloca o valor "__main__" em __name__,

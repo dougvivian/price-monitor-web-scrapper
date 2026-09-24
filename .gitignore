@@ -5,3 +5,6 @@ __pycache__/
 .claude/settings.local.json
 CLAUDE.local.md
 .pytest_cache/
+
+# Banco de dados gerado pela coleta (dado, nao codigo)
+dados/monitor.db
