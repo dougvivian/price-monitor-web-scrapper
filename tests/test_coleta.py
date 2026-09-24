@@ -13,7 +13,7 @@ import main
 
 
 PAGINA_VARIACAO = Path(__file__).parent / "paginas" / "produto_variacao_sku.html"
-URL_VARIACAO = "https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm-cinza-Marca/p?skuId=10000103"
+URL_VARIACAO = "https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm/p?skuId=10000103"
 
 
 class RespostaFalsa:
@@ -74,7 +74,7 @@ def test_preco_com_variacao_normal_e_salvo(tmp_path, monkeypatch):
     coletas, alertas = ler_banco(arquivo_banco)
     assert len(coletas) == 2
     assert coletas[-1]["preco"] == 87.9
-    assert coletas[-1]["produto_nome"] == "Telha Fibrocimento Ondulada 6mm Cinza Marca 2,13 x 1,10m"
+    assert coletas[-1]["produto_nome"] == "Telha Fibrocimento Ondulada 6mm 2,13 x 1,10m"
     assert alertas == []
 
 
@@ -115,3 +115,17 @@ def test_erro_de_extracao_vai_para_tabela_de_erros(tmp_path, monkeypatch):
     assert len(erros) == 1
     assert erros[0]["tipo_erro"] == "extracao"
     assert "JSON-LD" in erros[0]["mensagem"]
+
+
+def test_sem_cadastro_de_produtos_avisa_e_nao_coleta(tmp_path, monkeypatch, capsys):
+    # capsys captura o que o programa imprime no terminal, para conferirmos a mensagem.
+    monkeypatch.setattr(main, "ARQUIVO_PRODUTOS", tmp_path / "nao_existe.csv")
+    monkeypatch.setattr(main, "ARQUIVO_BANCO", tmp_path / "teste.db")
+
+    main.main()
+
+    saida = capsys.readouterr().out
+    assert "Cadastro de produtos nao encontrado" in saida
+    assert "produtos.exemplo.csv" in saida
+    # Nem chegou a abrir o banco.
+    assert not (tmp_path / "teste.db").exists()

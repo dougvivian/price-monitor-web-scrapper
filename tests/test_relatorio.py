@@ -56,7 +56,7 @@ def test_relatorio_mostra_ultimo_preco_e_historico():
 
 
 def test_relatorio_mostra_alertas_com_nome_do_produto():
-    coletas = [criar_coleta("PRD-008", 36.9, "2026-09-24 10:00:00", nome="Telha Marca 3,66m")]
+    coletas = [criar_coleta("PRD-008", 36.9, "2026-09-24 10:00:00", nome="Telha 3,66m")]
     alertas = [
         criar_alerta("PRD-008", 36.9, 114.9, 211.4),
         criar_alerta("PRD-001", 61.9, 6.19, -90.0),
@@ -64,7 +64,7 @@ def test_relatorio_mostra_alertas_com_nome_do_produto():
 
     html = gerar_html(coletas, [], alertas)
 
-    assert "Telha Marca 3,66m" in html
+    assert "Telha 3,66m" in html
     assert "R$36,90" in html
     assert "R$114,90" in html
     assert "▲ +211.4%" in html

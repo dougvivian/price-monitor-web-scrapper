@@ -72,7 +72,7 @@ def ler_json_ld_produto(soup):
 
 
 def ler_variacoes_vtex(soup):
-    # Lojas feitas na plataforma VTEX (caso da Loja A) guardam na pagina um objeto
+    # Lojas feitas na plataforma VTEX guardam na pagina um objeto
     # chamado __STATE__, com os dados de cada variacao (SKU): nome completo, medida, EAN...
     # Ele NAO e padrao schema.org (so existe em lojas VTEX), entao usamos apenas como
     # complemento do JSON-LD: se nao existir, seguimos sem ele.
@@ -113,7 +113,7 @@ def listar_ofertas(json_produto):
     #   - uma oferta so:        {"@type": "Offer", "price": 26.9, ...}
     #   - uma lista de ofertas: [{...}, {...}]
     #   - um "AggregateOffer", que agrupa varias ofertas dentro de outro "offers"
-    #     (e o caso da Loja A: uma oferta para cada variacao/SKU do produto).
+    #     (comum em lojas VTEX: uma oferta para cada variacao/SKU do produto).
     ofertas = json_produto.get("offers")
 
     if isinstance(ofertas, dict) and ofertas.get("@type") == "AggregateOffer":
@@ -189,9 +189,9 @@ def extrair_dados_produto(html, produto):
     oferta = escolher_oferta(ofertas, descobrir_sku(produto))
 
     # O "name" do JSON-LD e o nome do produto "pai", sem a medida da variacao
-    # (ex.: "Telha Fibrocimento Ondulada 6mm Cinza Marca").
+    # (ex.: "Telha Fibrocimento Ondulada 6mm").
     # Se a pagina tiver os dados VTEX, usamos o nome completo da variacao escolhida
-    # (ex.: "Telha Fibrocimento Ondulada 6mm Cinza Marca 2,13 x 1,10m").
+    # (ex.: "Telha Fibrocimento Ondulada 6mm 2,13 x 1,10m").
     variacoes = ler_variacoes_vtex(soup)
     variacao = variacoes.get(str(oferta.get("sku", "")).lstrip("0"), {})
 
@@ -358,6 +358,13 @@ def coletar_produto(conexao, produto, ultimos_precos, ultimos_alertas):
 # A funcao main junta o passo a passo da coleta.
 # Ela so roda quando o arquivo e executado diretamente (ver o "if" no final do arquivo).
 def main():
+    # O cadastro real (produtos.csv) nao vai para o GitHub, porque mostra quais produtos
+    # sao monitorados. No repositorio fica so o produtos.exemplo.csv, como modelo.
+    if not ARQUIVO_PRODUTOS.exists():
+        print(f"Cadastro de produtos nao encontrado: {ARQUIVO_PRODUTOS}")
+        print("Copie dados/produtos.exemplo.csv para dados/produtos.csv e preencha com os seus produtos.")
+        return
+
     produtos = ler_produtos()
     conexao = banco.conectar(ARQUIVO_BANCO)
 

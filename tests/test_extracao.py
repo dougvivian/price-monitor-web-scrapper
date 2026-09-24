@@ -1,6 +1,6 @@
 # Testes da funcao extrair_dados_produto.
 # Nenhum teste acessa o site: usamos paginas HTML salvas na pasta tests/paginas
-# (baixadas da Loja A em 2026-09-24) ou pequenos trechos de HTML escritos aqui mesmo.
+# (paginas sinteticas que imitam uma loja na plataforma VTEX) ou pequenos trechos de HTML escritos aqui mesmo.
 # Assim os testes sao rapidos, funcionam sem internet e sempre dao o mesmo resultado.
 #
 # Para rodar:  python -m pytest
@@ -36,11 +36,11 @@ def criar_produto(url="https://exemplo.com/produto/p", sku=""):
 # ---------------------------------------------------------------------------
 
 def test_variacao_usa_preco_do_sku_da_url():
-    # Pagina baixada com ?skuId=10000103. O JSON-LD tem 6 ofertas (uma por tamanho);
+    # Pagina acessada com ?skuId=10000103. O JSON-LD tem 6 ofertas (uma por tamanho);
     # a do SKU 10000103 custa R$87,90. O metodo antigo (seletor CSS) devolvia R$61,90,
     # que era o preco de outra variacao.
     html = ler_pagina("produto_variacao_sku.html")
-    url = "https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm-cinza-Marca/p?skuId=10000103"
+    url = "https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm/p?skuId=10000103"
 
     dados = extrair_dados_produto(html, criar_produto(url=url))
 
@@ -48,13 +48,13 @@ def test_variacao_usa_preco_do_sku_da_url():
     assert dados["preco_numero"] == 87.9
     assert dados["preco_texto"] == "R$87,90"
     # O nome vem da variacao (dados VTEX), com a medida no final.
-    assert dados["produto_nome"] == "Telha Fibrocimento Ondulada 6mm Cinza Marca 2,13 x 1,10m"
+    assert dados["produto_nome"] == "Telha Fibrocimento Ondulada 6mm 2,13 x 1,10m"
 
 
 def test_sku_da_coluna_tem_prioridade_sobre_o_link():
     # Se a coluna sku estiver preenchida, ela vale mais que o ?skuId= do link.
     html = ler_pagina("produto_variacao_sku.html")
-    url = "https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm-cinza-Marca/p?skuId=10000103"
+    url = "https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm/p?skuId=10000103"
 
     dados = extrair_dados_produto(html, criar_produto(url=url, sku="10000101"))
 
@@ -77,7 +77,7 @@ def test_varias_ofertas_com_sku_na_coluna():
 
     assert dados["status_produto"] == "disponivel"
     assert dados["preco_numero"] == 25.9
-    assert dados["produto_nome"] == "Telha de Fibrocimento Ondulada Marca Marca Cinza 4mm 2,44m x 50cm"
+    assert dados["produto_nome"] == "Telha Ondulada Fibrocimento 4mm 2,44m x 50cm"
 
 
 def test_sku_inexistente_gera_erro():
@@ -99,7 +99,7 @@ def test_produto_fora_de_estoque_fica_indisponivel_sem_preco():
     assert dados["preco_texto"] == ""
     assert dados["preco_numero"] == ""
     assert dados["mensagem"] == "OutOfStock (preco anunciado: R$229,90)"
-    assert dados["produto_nome"] == "Placa Cimentícia 6mm Cinza Marca 1,20 x 3m Peça"
+    assert dados["produto_nome"] == "Placa Cimentícia 6mm 1,20 x 3m Peça"
 
 
 def test_sku_com_zero_a_esquerda():

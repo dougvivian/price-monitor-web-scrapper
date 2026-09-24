@@ -1,0 +1,5 @@
+produto_id;concorrente;url;sku;ativo;categoria;observacao
+PRD-001;Loja A;https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm/p?skuId=10000103;;sim;telha;SKU informado no proprio link (?skuId=)
+PRD-002;Loja A;https://www.loja-exemplo.com.br/telha-ondulada-fibrocimento-4mm/p;20000202;sim;telha;SKU informado na coluna sku
+PRD-003;Loja A;https://www.loja-exemplo.com.br/placa-cimenticia-6mm/p;;sim;placa cimenticia;pagina com uma variacao so: nao precisa de SKU
+PRD-004;Loja A;https://www.loja-exemplo.com.br/cimento-cp-ii-50kg/p;;nao;cimento;ativo=nao: produto fica fora da coleta

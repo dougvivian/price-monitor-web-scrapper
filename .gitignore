@@ -11,3 +11,7 @@ dados/monitor.db
 
 # Relatorio HTML gerado a partir do banco (dado, nao codigo)
 relatorios/relatorio.html
+
+# Cadastro real de produtos monitorados (informacao comercial, fica so local)
+# Modelo publico: dados/produtos.exemplo.csv
+dados/produtos.csv
