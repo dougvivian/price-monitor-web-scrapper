@@ -28,12 +28,15 @@ produto por produto. O projeto tambem e um estudo de automacao, coleta e tratame
 - Gera `relatorios/relatorio.html` com:
   - resumo da ultima coleta;
   - alertas de variacao de preco;
+  - comparativo entre lojas: o mesmo produto (mesmo EAN) ou produtos equivalentes
+    (mesmo `grupo` no cadastro), do mais barato para o mais caro;
   - ultimo preco de cada produto, com a variacao desde a coleta anterior;
   - historico, busca e filtro por disponibilidade;
   - erros da ultima coleta separados dos anteriores.
 
-Funciona com lojas na plataforma **VTEX** que publicam dados estruturados
-**schema.org** (JSON-LD) nas paginas de produto, padrao comum no varejo online brasileiro.
+Funciona com lojas que publicam dados estruturados **schema.org** (JSON-LD) nas paginas
+de produto, padrao comum no varejo online brasileiro. Testado em lojas **VTEX** e
+**Shopify**.
 
 ## Como rodar
 
@@ -89,7 +92,8 @@ src/
 dados/
   produtos.exemplo.csv modelo do cadastro de produtos
   produtos.csv         cadastro real dos produtos monitorados (editavel no Excel, fora do Git)
-                       colunas: produto_id, concorrente, url, sku, ativo, categoria, observacao
+                       colunas: produto_id, concorrente, url, sku, ativo, categoria, observacao,
+                       grupo (opcional: mesmo codigo = produtos equivalentes entre lojas)
   monitor.db           banco SQLite, criado na primeira coleta (fora do Git)
                        tabelas: coletas, erros, alertas, execucoes
 relatorios/
@@ -155,6 +159,12 @@ dados e colunas novas sem quebrar o arquivo. O cadastro de produtos continua em 
 porque e editado a mao no Excel. Colunas novas sao acrescentadas por uma migracao
 automatica (`ALTER TABLE`), sem perder dados.
 
+**Comparacao entre lojas: EAN automatico + grupo manual.** O EAN (codigo de barras) casa
+sozinho o mesmo produto em lojas diferentes. Mas produtos equivalentes de marcas
+diferentes (ex.: o mesmo ferro CA50 10mm de outro fabricante) tem EANs diferentes e
+tambem interessam na comparacao. Para esses, a coluna opcional `grupo` do cadastro da
+o mesmo codigo aos equivalentes. Quando existe, o grupo tem prioridade sobre o EAN.
+
 **Testes sem internet.** As paginas de teste sao sinteticas e o `requests.get` e
 trocado por um site falso (`monkeypatch`). Os testes sao rapidos, repetiveis e nao
 incomodam o site.
@@ -172,8 +182,10 @@ repositorio ha so um modelo (`produtos.exemplo.csv`) e paginas de teste ficticia
 - Paginas incompletas do site: alguns produtos podem ficar sem coleta em certos dias.
 - O `robotparser` do Python nao entende curingas (`*`) no meio das regras do
   robots.txt; nesses casos a regra e tratada como texto comum.
-- O nome da variacao e o EAN dependem dos dados VTEX; em outras plataformas, o nome
-  vem do JSON-LD e o EAN fica vazio.
+- O EAN vem do `gtin` do JSON-LD; nas lojas VTEX, que nao costumam publicar, vem dos
+  dados VTEX. Se nenhum dos dois existir, o produto so entra no comparativo pelo `grupo`.
+- Em lojas Shopify, produtos com varias variacoes (`?variant=`) ainda nao sao tratados:
+  o monitor registra "SKU ambiguo".
 - A coleta agendada depende do computador ligado (se estiver desligado as 9h, roda
   assim que for ligado).
 
@@ -191,7 +203,8 @@ repositorio ha so um modelo (`produtos.exemplo.csv`) e paginas de teste ficticia
   - [x] Respeito automatico ao robots.txt
   - [x] Guardar o EAN dos produtos
   - [x] Testes automaticos no GitHub Actions
-  - [ ] Mais concorrentes, com produtos casados entre lojas pelo EAN
+  - [x] Comparativo entre lojas no relatorio (EAN + grupo de equivalencia)
+  - [ ] Mais concorrentes
 - **v3:** painel com graficos e alertas de mudanca de preco (Telegram/e-mail).
 
 ## Tecnologias

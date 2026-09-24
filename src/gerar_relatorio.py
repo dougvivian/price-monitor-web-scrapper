@@ -6,7 +6,7 @@ from pathlib import Path
 import banco
 # Reaproveitamos do main.py o caminho do banco e a formatacao de preco,
 # para nao repetir o mesmo codigo em dois lugares.
-from main import ARQUIVO_BANCO, agora, calcular_variacao, formatar_preco
+from main import ARQUIVO_BANCO, ARQUIVO_PRODUTOS, agora, calcular_variacao, formatar_preco, ler_cadastro
 
 
 PASTA_PROJETO = Path(__file__).resolve().parent.parent
@@ -70,6 +70,116 @@ def separar_erros(erros, ultima_execucao):
     return recentes, antigos
 
 
+def ler_grupos(cadastro):
+    # Dicionario produto_id -> grupo, a partir da coluna opcional "grupo" do produtos.csv.
+    # O grupo e um codigo que NOS damos para produtos equivalentes em lojas diferentes
+    # (ex.: "FERRO-CA50-10"). Cadastro sem essa coluna simplesmente nao tem grupos.
+    grupos = {}
+
+    for linha in cadastro:
+        grupo = (linha.get("grupo") or "").strip()
+
+        if grupo:
+            grupos[linha["produto_id"]] = grupo
+
+    return grupos
+
+
+def chave_comparacao(produto_id, historico, grupos):
+    # Define com quem o produto vai ser comparado:
+    #   1o: o grupo do cadastro (equivalencia definida por nos, vale ate entre marcas diferentes);
+    #   2o: o EAN (codigo de barras igual = mesmo produto, casamento automatico).
+    # Usamos o EAN mais recente do historico (coletas antigas podem nao ter EAN).
+    # Sem grupo e sem EAN, devolve "" e o produto fica fora do comparativo.
+    if produto_id in grupos:
+        return grupos[produto_id]
+
+    ean = next((coleta["ean"] for coleta in historico if coleta.get("ean")), "")
+
+    if ean:
+        return f"EAN {ean}"
+
+    return ""
+
+
+def montar_comparativos(coletas_por_produto, grupos):
+    # Junta os produtos com a mesma chave de comparacao (grupo ou EAN).
+    # Resultado: {chave: [ultima coleta de cada produto da chave]}.
+    comparativos = defaultdict(list)
+
+    for produto_id, historico in coletas_por_produto.items():
+        chave = chave_comparacao(produto_id, historico, grupos)
+
+        if chave:
+            comparativos[chave].append(historico[0])
+
+    # So faz sentido comparar quando a chave junta pelo menos 2 lojas diferentes.
+    # Usamos um set dos concorrentes para contar lojas sem repeticao.
+    return {
+        chave: ultimas_coletas
+        for chave, ultimas_coletas in sorted(comparativos.items())
+        if len({coleta["concorrente"] for coleta in ultimas_coletas}) >= 2
+    }
+
+
+def criar_card_comparativo(chave, ultimas_coletas):
+    # Ordena do mais barato para o mais caro; sem preco (indisponivel) vai para o fim.
+    # A chave de ordenacao e uma tupla: (True/False, preco). False vem antes de True.
+    ordenadas = sorted(
+        ultimas_coletas,
+        key=lambda coleta: (coleta["preco"] is None, coleta["preco"] or 0),
+    )
+    precos = [coleta["preco"] for coleta in ordenadas if coleta["preco"] is not None]
+
+    # Diferenca entre o maior e o menor preco, em % sobre o menor.
+    resumo = "Menos de 2 precos disponiveis para comparar."
+
+    if len(precos) >= 2:
+        diferenca = calcular_variacao(precos[0], precos[-1]) * 100
+        diferenca_texto = f"{diferenca:.1f}".replace(".", ",")
+        resumo = f"O mais caro custa {diferenca_texto}% a mais que o mais barato."
+
+    linhas = []
+
+    for coleta in ordenadas:
+        # Selo "mais barato" so no primeiro da lista, e so se ele tiver preco.
+        selo = ""
+
+        if precos and coleta is ordenadas[0]:
+            selo = ' <span class="status status-disponivel">mais barato</span>'
+
+        linhas.append(f"""
+            <tr>
+                <td>{escape(coleta["concorrente"])}</td>
+                <td><strong>{escape(coleta["produto_id"])}</strong> {escape(coleta["produto_nome"])}</td>
+                <td>{escape(coleta["preco_texto"] or "Sem preco")}{selo}</td>
+                <td>{escape(coleta["status_produto"])}</td>
+                <td><a href="{escape(coleta["url"])}" target="_blank" rel="noopener noreferrer">Ver no site</a></td>
+            </tr>
+        """)
+
+    return f"""
+        <div class="comparativo">
+            <h3>{escape(chave)}</h3>
+            <p class="subtitulo">{escape(resumo)}</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Loja</th>
+                        <th>Produto</th>
+                        <th>Preco</th>
+                        <th>Status</th>
+                        <th>Link</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {"".join(linhas)}
+                </tbody>
+            </table>
+        </div>
+    """
+
+
 def criar_resumo_execucao(ultima_execucao):
     if ultima_execucao is None:
         return "Nenhuma coleta registrada ainda."
@@ -125,6 +235,7 @@ def criar_card_produto(produto_id, historico, teve_erro_na_ultima_coleta=False):
                 <div class="produto-principal">
                     <span class="produto-id">{escape(produto_id)}</span>
                     <span class="produto-nome">{escape(ultima_coleta["produto_nome"])}</span>
+                    <span class="data-coleta">{escape(ultima_coleta["concorrente"])}</span>
                     <span class="data-coleta">coletado em {escape(ultima_coleta["data_coleta"])}</span>
                 </div>
                 <div class="produto-meta">
@@ -216,8 +327,20 @@ def criar_tabela_erros(erros, mensagem_vazia):
     """
 
 
-def gerar_html(coletas, erros, alertas, ultima_execucao=None):
+def gerar_html(coletas, erros, alertas, ultima_execucao=None, grupos=None):
     coletas_por_produto = agrupar_coletas_por_produto(coletas)
+
+    # Comparativo entre lojas: produtos casados pelo grupo do cadastro ou pelo EAN.
+    comparativos = montar_comparativos(coletas_por_produto, grupos or {})
+    cards_comparativos = "\n".join(
+        criar_card_comparativo(chave, ultimas_coletas)
+        for chave, ultimas_coletas in comparativos.items()
+    )
+
+    if cards_comparativos == "":
+        cards_comparativos = """
+            <p class="subtitulo">Nenhum produto casado entre lojas ainda (mesmo EAN ou mesmo grupo).</p>
+        """
 
     # Separamos os erros da ultima coleta (o que precisa de atencao agora)
     # dos erros antigos (so para consulta; mostramos os 20 mais recentes).
@@ -474,11 +597,24 @@ def gerar_html(coletas, erros, alertas, ultima_execucao=None):
             text-transform: uppercase;
         }}
 
-        .secao-erros, .secao-alertas {{
+        .secao-erros, .secao-alertas, .secao-comparativo {{
             margin-top: 32px;
         }}
 
-        .secao-alertas {{
+        .comparativo {{
+            background: #ffffff;
+            border: 1px solid #d9e0e7;
+            border-radius: 8px;
+            margin-top: 12px;
+            padding: 14px 16px;
+            overflow-x: auto;
+        }}
+
+        .comparativo h3 {{
+            margin: 0;
+        }}
+
+        .secao-alertas, .secao-comparativo {{
             margin-bottom: 32px;
         }}
 
@@ -562,6 +698,15 @@ def gerar_html(coletas, erros, alertas, ultima_execucao=None):
                     {linhas_alertas}
                 </tbody>
             </table>
+        </section>
+
+        <section class="secao-comparativo">
+            <h2>Comparativo entre Lojas</h2>
+            <p class="subtitulo">
+                Ultimo preco de cada loja para o mesmo produto (mesmo EAN) ou para produtos
+                equivalentes (mesmo grupo no produtos.csv).
+            </p>
+            {cards_comparativos}
         </section>
 
         <section>
@@ -653,7 +798,11 @@ def main():
     finally:
         conexao.close()
 
-    html = gerar_html(coletas, erros, alertas, ultima_execucao)
+    # Os grupos de equivalencia vem do cadastro. Sem produtos.csv, o comparativo usa so o EAN.
+    cadastro = ler_cadastro() if ARQUIVO_PRODUTOS.exists() else []
+    grupos = ler_grupos(cadastro)
+
+    html = gerar_html(coletas, erros, alertas, ultima_execucao, grupos)
 
     ARQUIVO_RELATORIO.parent.mkdir(exist_ok=True)
 

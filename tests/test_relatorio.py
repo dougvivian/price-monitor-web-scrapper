@@ -1,16 +1,17 @@
 # Testes do relatorio HTML (gerar_relatorio.py).
 # Montamos os dados na mao, no mesmo formato que o banco devolve,
 # e conferimos se o HTML gerado contem o que esperamos.
-from gerar_relatorio import gerar_html, preparar_coleta
+from gerar_relatorio import gerar_html, ler_grupos, montar_comparativos, agrupar_coletas_por_produto, preparar_coleta
 
 
-def criar_coleta(produto_id, preco, data_coleta, nome="Telha teste"):
+def criar_coleta(produto_id, preco, data_coleta, nome="Telha teste", concorrente="Loja A", ean=None):
     # Mesmo formato de uma linha da tabela coletas lida do banco.
     return preparar_coleta({
         "id": 1,
         "produto_id": produto_id,
-        "concorrente": "Loja A",
+        "concorrente": concorrente,
         "produto_nome": nome,
+        "ean": ean,
         "preco": preco,
         "status_produto": "disponivel" if preco is not None else "indisponivel",
         "mensagem": None if preco is not None else "OutOfStock (preco anunciado: R$229,90)",
@@ -150,3 +151,74 @@ def test_erros_da_ultima_coleta_separados_dos_antigos():
     assert "PRD-010" in secao_antigos
     # O produto que falhou na ultima coleta ganha o aviso no card.
     assert "erro na ultima coleta</span>" in html
+
+
+# ---------- Comparativo entre lojas ----------
+
+def test_ler_grupos_ignora_produtos_sem_grupo_e_cadastro_sem_a_coluna():
+    cadastro = [
+        {"produto_id": "PRD-001", "grupo": " TELHA-6MM "},
+        {"produto_id": "PRD-002", "grupo": ""},
+        {"produto_id": "PRD-003"},   # cadastro antigo, sem a coluna grupo
+    ]
+
+    assert ler_grupos(cadastro) == {"PRD-001": "TELHA-6MM"}
+
+
+def test_comparativo_casa_produtos_de_lojas_diferentes_pelo_ean():
+    coletas = [
+        criar_coleta("PRD-001", 64.9, "2026-09-24 09:00:00", concorrente="Loja A", ean="7890000000035"),
+        criar_coleta("PRD-101", 59.9, "2026-09-24 09:00:00", concorrente="Loja B", ean="7890000000035"),
+        criar_coleta("PRD-002", 25.9, "2026-09-24 09:00:00", concorrente="Loja A", ean="7890000000202"),
+    ]
+
+    comparativos = montar_comparativos(agrupar_coletas_por_produto(coletas), {})
+
+    # So o EAN que aparece nas duas lojas vira comparativo.
+    assert list(comparativos) == ["EAN 7890000000035"]
+    assert {coleta["produto_id"] for coleta in comparativos["EAN 7890000000035"]} == {"PRD-001", "PRD-101"}
+
+
+def test_grupo_do_cadastro_casa_marcas_diferentes_e_tem_prioridade_sobre_o_ean():
+    coletas = [
+        criar_coleta("PRD-001", 53.9, "2026-09-24 09:00:00", concorrente="Loja A", ean="7890000000011"),
+        criar_coleta("PRD-101", 49.9, "2026-09-24 09:00:00", concorrente="Loja B", ean="7890000000099"),
+    ]
+    grupos = {"PRD-001": "FERRO-CA50-10", "PRD-101": "FERRO-CA50-10"}
+
+    comparativos = montar_comparativos(agrupar_coletas_por_produto(coletas), grupos)
+
+    assert list(comparativos) == ["FERRO-CA50-10"]
+
+
+def test_mesma_loja_nao_vira_comparativo():
+    coletas = [
+        criar_coleta("PRD-001", 64.9, "2026-09-24 09:00:00", ean="7890000000035"),
+        criar_coleta("PRD-002", 61.9, "2026-09-24 09:00:00", ean="7890000000035"),
+    ]
+
+    assert montar_comparativos(agrupar_coletas_por_produto(coletas), {}) == {}
+
+
+def test_relatorio_mostra_comparativo_com_mais_barato_e_diferenca():
+    coletas = [
+        criar_coleta("PRD-001", 60.0, "2026-09-24 09:00:00", concorrente="Loja A"),
+        criar_coleta("PRD-101", 50.0, "2026-09-24 09:00:00", concorrente="Loja B"),
+        criar_coleta("PRD-201", None, "2026-09-24 09:00:00", concorrente="Loja C"),   # indisponivel
+    ]
+    grupos = {"PRD-001": "TELHA-6MM", "PRD-101": "TELHA-6MM", "PRD-201": "TELHA-6MM"}
+
+    html = gerar_html(coletas, [], [], grupos=grupos)
+
+    assert "Comparativo entre Lojas" in html
+    assert "TELHA-6MM" in html
+    assert "mais barato" in html
+    assert "O mais caro custa 20,0% a mais que o mais barato." in html
+    # Ordem: mais barato primeiro, indisponivel por ultimo.
+    assert html.index("PRD-101</strong>") < html.index("PRD-001</strong>") < html.index("PRD-201</strong>")
+
+
+def test_relatorio_sem_comparativos_mostra_aviso():
+    html = gerar_html([criar_coleta("PRD-001", 10.0, "2026-09-24 09:00:00")], [], [])
+
+    assert "Nenhum produto casado entre lojas ainda" in html

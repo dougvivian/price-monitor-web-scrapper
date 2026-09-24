@@ -1,5 +1,6 @@
-produto_id;concorrente;url;sku;ativo;categoria;observacao
-PRD-001;Loja A;https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm/p?skuId=10000103;;sim;telha;SKU informado no proprio link (?skuId=)
-PRD-002;Loja A;https://www.loja-exemplo.com.br/telha-ondulada-fibrocimento-4mm/p;20000202;sim;telha;SKU informado na coluna sku
-PRD-003;Loja A;https://www.loja-exemplo.com.br/placa-cimenticia-6mm/p;;sim;placa cimenticia;pagina com uma variacao so: nao precisa de SKU
-PRD-004;Loja A;https://www.loja-exemplo.com.br/cimento-cp-ii-50kg/p;;nao;cimento;ativo=nao: produto fica fora da coleta
+produto_id;concorrente;url;sku;ativo;categoria;observacao;grupo
+PRD-001;Loja A;https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm/p?skuId=10000103;;sim;telha;SKU informado no proprio link (?skuId=);TELHA-6MM-2.13
+PRD-002;Loja A;https://www.loja-exemplo.com.br/telha-ondulada-fibrocimento-4mm/p;20000202;sim;telha;SKU informado na coluna sku;
+PRD-003;Loja A;https://www.loja-exemplo.com.br/placa-cimenticia-6mm/p;;sim;placa cimenticia;pagina com uma variacao so: nao precisa de SKU;
+PRD-004;Loja A;https://www.loja-exemplo.com.br/cimento-cp-ii-50kg/p;;nao;cimento;ativo=nao: produto fica fora da coleta;
+PRD-101;Loja B;https://www.loja-b-exemplo.com.br/products/telha-6mm-2-13;;sim;telha;outra loja: mesmo grupo do PRD-001 para comparar precos;TELHA-6MM-2.13
