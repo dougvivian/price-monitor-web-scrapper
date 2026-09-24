@@ -252,14 +252,43 @@ def ler_gtin(dados):
     return ""
 
 
+def ean_valido(codigo):
+    # Todo codigo de barras (GTIN/EAN) tem 8, 12, 13 ou 14 digitos, e o ultimo e um
+    # "digito verificador", calculado a partir dos outros. Conferir esse digito separa um
+    # EAN de verdade de outros numeros que as lojas as vezes colocam no campo (ex.: o
+    # codigo interno do SKU).
+    if not codigo.isdigit() or len(codigo) not in (8, 12, 13, 14):
+        return False
+
+    digitos = [int(digito) for digito in codigo]
+    corpo = digitos[:-1]
+
+    # Regra do GTIN: da direita para a esquerda, multiplica os digitos por 3, 1, 3, 1...
+    # e soma. O verificador e o que falta para a soma chegar no proximo multiplo de 10.
+    soma = sum(
+        digito * (3 if posicao % 2 == 0 else 1)
+        for posicao, digito in enumerate(reversed(corpo))
+    )
+    return (10 - soma % 10) % 10 == digitos[-1]
+
+
 def descobrir_ean(oferta, json_produto, variacao):
     # EAN = codigo de barras do produto. Serve para casar o mesmo produto entre lojas.
-    # Mesma regra do preco: primeiro o padrao (JSON-LD), depois o complemento.
-    #   1o: gtin da oferta escolhida (cada variacao pode ter o seu);
-    #   2o: gtin do produto no JSON-LD;
-    #   3o: EAN dos dados VTEX da variacao (lojas VTEX nao costumam ter gtin no JSON-LD).
-    # Se nada disso existir, fica vazio.
-    return ler_gtin(oferta) or ler_gtin(json_produto) or str(variacao.get("ean") or "").strip()
+    # Procuramos nesta ordem, do mais especifico (a variacao escolhida) para o mais geral:
+    #   1o: gtin da oferta escolhida no JSON-LD (cada variacao pode ter o seu);
+    #   2o: EAN dos dados VTEX da variacao escolhida;
+    #   3o: gtin do produto "pai" no JSON-LD.
+    # O gtin do produto fica por ultimo porque vale para a pagina toda, e nao para a
+    # variacao: numa loja VTEX ele vinha preenchido com o codigo do SKU padrao, e todas
+    # as medidas da telha ficavam com o mesmo "EAN" errado.
+    # So aceitamos codigos com digito verificador correto. Se nenhum servir, fica vazio.
+    candidatos = [ler_gtin(oferta), str(variacao.get("ean") or "").strip(), ler_gtin(json_produto)]
+
+    for codigo in candidatos:
+        if ean_valido(codigo):
+            return codigo
+
+    return ""
 
 
 def formatar_preco(preco_numero):

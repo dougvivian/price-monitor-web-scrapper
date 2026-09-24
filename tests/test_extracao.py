@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from main import extrair_dados_produto
+from main import ean_valido, extrair_dados_produto
 
 
 PASTA_PAGINAS = Path(__file__).parent / "paginas"
@@ -247,13 +247,13 @@ def test_ean_da_variacao_vem_dos_dados_vtex():
     dados = extrair_dados_produto(html, criar_produto(url=url))
 
     # Cada variacao tem o seu proprio EAN: este e o da 2,13 x 1,10m.
-    assert dados["ean"] == "7890000000035"
+    assert dados["ean"] == "7890000000352"
 
 
 def test_ean_de_produto_indisponivel_tambem_e_guardado():
     dados = extrair_dados_produto(ler_pagina("produto_indisponivel.html"), criar_produto())
 
-    assert dados["ean"] == "7890000000202"
+    assert dados["ean"] == "7890000002028"
 
 
 def test_sem_dados_vtex_o_ean_fica_vazio():
@@ -271,27 +271,65 @@ def test_ean_vem_do_gtin_do_json_ld():
     json_ld = montar_produto_json(
         {"@type": "Offer", "price": 6.9, "availability": "https://schema.org/InStock"}
     )
-    json_ld["gtin"] = "7890000000301"
+    json_ld["gtin"] = "7890000003018"
     html = montar_html(json_ld)
 
     dados = extrair_dados_produto(html, criar_produto())
 
-    assert dados["ean"] == "7890000000301"
+    assert dados["ean"] == "7890000003018"
 
 
 def test_gtin_da_oferta_tem_prioridade_sobre_o_do_produto():
     json_ld = montar_produto_json({
         "@type": "AggregateOffer",
         "offers": [
-            {"@type": "Offer", "sku": "111", "price": 10, "gtin13": "7890000000401",
+            {"@type": "Offer", "sku": "111", "price": 10, "gtin13": "7890000004015",
              "availability": "http://schema.org/InStock"},
-            {"@type": "Offer", "sku": "222", "price": 20, "gtin13": "7890000000402",
+            {"@type": "Offer", "sku": "222", "price": 20, "gtin13": "7890000004022",
              "availability": "http://schema.org/InStock"},
         ],
     })
-    json_ld["gtin13"] = "7890000000400"   # gtin do produto "pai"
+    json_ld["gtin13"] = "7890000004008"   # gtin do produto "pai"
     html = montar_html(json_ld)
 
     dados = extrair_dados_produto(html, criar_produto(sku="222"))
 
-    assert dados["ean"] == "7890000000402"
+    assert dados["ean"] == "7890000004022"
+
+def test_gtin_do_produto_pai_nao_passa_na_frente_do_ean_da_variacao():
+    # Caso real: a loja preenchia o "gtin" do produto "pai" com o codigo do SKU padrao.
+    # Se ele tivesse prioridade, todas as medidas da telha ficariam com o mesmo EAN errado.
+    html = ler_pagina("produto_variacao_sku.html").replace(
+        '"@type":"Product",', '"@type":"Product","gtin":"10000101",', 1
+    )
+    url = "https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm/p?skuId=10000103"
+
+    dados = extrair_dados_produto(html, criar_produto(url=url))
+
+    assert dados["ean"] == "7890000000352"
+
+
+def test_gtin_invalido_e_ignorado():
+    # "10000101" nao tem digito verificador valido: nao e um codigo de barras.
+    json_ld = montar_produto_json(
+        {"@type": "Offer", "price": 6.9, "availability": "https://schema.org/InStock"}
+    )
+    json_ld["gtin"] = "10000101"
+    html = montar_html(json_ld)
+
+    dados = extrair_dados_produto(html, criar_produto())
+
+    assert dados["ean"] == ""
+
+
+@pytest.mark.parametrize("codigo, esperado", [
+    ("7890000000352", True),    # EAN-13 valido
+    ("7890000000353", False),   # mesmo codigo com o digito verificador errado
+    ("96385074", True),         # EAN-8 valido
+    ("10000101", False),        # codigo interno de SKU, nao e EAN
+    ("789000000035A", False),   # tem letra
+    ("12345", False),           # tamanho que nao existe
+    ("", False),
+])
+def test_ean_valido(codigo, esperado):
+    assert ean_valido(codigo) == esperado

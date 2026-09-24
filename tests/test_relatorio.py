@@ -167,22 +167,22 @@ def test_ler_grupos_ignora_produtos_sem_grupo_e_cadastro_sem_a_coluna():
 
 def test_comparativo_casa_produtos_de_lojas_diferentes_pelo_ean():
     coletas = [
-        criar_coleta("PRD-001", 64.9, "2026-09-24 09:00:00", concorrente="Loja A", ean="7890000000035"),
-        criar_coleta("PRD-101", 59.9, "2026-09-24 09:00:00", concorrente="Loja B", ean="7890000000035"),
-        criar_coleta("PRD-002", 25.9, "2026-09-24 09:00:00", concorrente="Loja A", ean="7890000000202"),
+        criar_coleta("PRD-001", 64.9, "2026-09-24 09:00:00", concorrente="Loja A", ean="7890000000352"),
+        criar_coleta("PRD-101", 59.9, "2026-09-24 09:00:00", concorrente="Loja B", ean="7890000000352"),
+        criar_coleta("PRD-002", 25.9, "2026-09-24 09:00:00", concorrente="Loja A", ean="7890000002028"),
     ]
 
     comparativos = montar_comparativos(agrupar_coletas_por_produto(coletas), {})
 
     # So o EAN que aparece nas duas lojas vira comparativo.
-    assert list(comparativos) == ["EAN 7890000000035"]
-    assert {coleta["produto_id"] for coleta in comparativos["EAN 7890000000035"]} == {"PRD-001", "PRD-101"}
+    assert list(comparativos) == ["EAN 7890000000352"]
+    assert {coleta["produto_id"] for coleta in comparativos["EAN 7890000000352"]} == {"PRD-001", "PRD-101"}
 
 
 def test_grupo_do_cadastro_casa_marcas_diferentes_e_tem_prioridade_sobre_o_ean():
     coletas = [
-        criar_coleta("PRD-001", 53.9, "2026-09-24 09:00:00", concorrente="Loja A", ean="7890000000011"),
-        criar_coleta("PRD-101", 49.9, "2026-09-24 09:00:00", concorrente="Loja B", ean="7890000000099"),
+        criar_coleta("PRD-001", 53.9, "2026-09-24 09:00:00", concorrente="Loja A", ean="7890000000116"),
+        criar_coleta("PRD-101", 49.9, "2026-09-24 09:00:00", concorrente="Loja B", ean="7890000000994"),
     ]
     grupos = {"PRD-001": "FERRO-CA50-10", "PRD-101": "FERRO-CA50-10"}
 
@@ -193,8 +193,8 @@ def test_grupo_do_cadastro_casa_marcas_diferentes_e_tem_prioridade_sobre_o_ean()
 
 def test_mesma_loja_nao_vira_comparativo():
     coletas = [
-        criar_coleta("PRD-001", 64.9, "2026-09-24 09:00:00", ean="7890000000035"),
-        criar_coleta("PRD-002", 61.9, "2026-09-24 09:00:00", ean="7890000000035"),
+        criar_coleta("PRD-001", 64.9, "2026-09-24 09:00:00", ean="7890000000352"),
+        criar_coleta("PRD-002", 61.9, "2026-09-24 09:00:00", ean="7890000000352"),
     ]
 
     assert montar_comparativos(agrupar_coletas_por_produto(coletas), {}) == {}

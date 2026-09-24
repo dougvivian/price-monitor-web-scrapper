@@ -101,7 +101,7 @@ def test_texto_com_aspas_e_gravado_sem_quebrar_o_sql(conexao):
 
 def test_ean_e_gravado_e_vazio_vira_null(conexao):
     com_ean = criar_coleta("PRD-001", 10.0)
-    com_ean["ean"] = "7890000000035"
+    com_ean["ean"] = "7890000000352"
     sem_ean = criar_coleta("PRD-002", 20.0)
     sem_ean["ean"] = ""
 
@@ -109,7 +109,7 @@ def test_ean_e_gravado_e_vazio_vira_null(conexao):
     banco.salvar_coleta(conexao, sem_ean)
 
     coletas = banco.listar_coletas(conexao)
-    assert coletas[0]["ean"] == "7890000000035"
+    assert coletas[0]["ean"] == "7890000000352"
     assert coletas[1]["ean"] is None
 
 

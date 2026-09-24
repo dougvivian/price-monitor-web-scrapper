@@ -182,8 +182,9 @@ repositorio ha so um modelo (`produtos.exemplo.csv`) e paginas de teste ficticia
 - Paginas incompletas do site: alguns produtos podem ficar sem coleta em certos dias.
 - O `robotparser` do Python nao entende curingas (`*`) no meio das regras do
   robots.txt; nesses casos a regra e tratada como texto comum.
-- O EAN vem do `gtin` do JSON-LD; nas lojas VTEX, que nao costumam publicar, vem dos
-  dados VTEX. Se nenhum dos dois existir, o produto so entra no comparativo pelo `grupo`.
+- O EAN vem do `gtin` da oferta no JSON-LD, senao dos dados VTEX da variacao, senao do
+  `gtin` do produto. So e aceito com digito verificador valido (algumas lojas colocam
+  o codigo do SKU nesse campo). Sem EAN, o produto so entra no comparativo pelo `grupo`.
 - Em lojas Shopify, produtos com varias variacoes (`?variant=`) ainda nao sao tratados:
   o monitor registra "SKU ambiguo".
 - A coleta agendada depende do computador ligado (se estiver desligado as 9h, roda
