@@ -1,0 +1,46 @@
+# GitHub Actions: o GitHub roda este "workflow" sozinho, num computador dele (na nuvem),
+# toda vez que o evento configurado acontece. Aqui: rodar os testes a cada push.
+#
+# O arquivo PRECISA ficar em .github/workflows/ para o GitHub encontrar.
+# O resultado aparece na aba "Actions" do repositorio (verde = passou, vermelho = falhou).
+
+# Nome que aparece na aba Actions e no selo (badge) do README.
+name: Testes
+
+# "on" define QUANDO o workflow roda.
+on:
+  push:                # a cada push, em qualquer branch
+  pull_request:        # a cada pull request aberto ou atualizado
+  workflow_dispatch:   # e tambem por um botao "Run workflow" na aba Actions
+
+# "jobs" sao as tarefas. Cada job roda numa maquina nova e limpa.
+jobs:
+  testes:
+    # Sistema da maquina virtual. ubuntu-latest (Linux) e o mais comum e o mais rapido.
+    runs-on: ubuntu-latest
+
+    # "steps" sao os passos do job, executados em ordem. Se um passo falhar, o job para.
+    steps:
+      # 1. Baixa o codigo do repositorio para dentro da maquina.
+      #    "uses" usa uma "action" pronta, publicada por outra pessoa/empresa.
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      # 2. Instala o Python na versao que usamos no projeto.
+      #    cache: pip guarda as bibliotecas baixadas, para os proximos runs ficarem mais rapidos.
+      - name: Instalar o Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      # 3. Instala as bibliotecas do requirements.txt.
+      #    "run" executa comandos de terminal, como faríamos no nosso computador.
+      - name: Instalar as dependencias
+        run: pip install -r requirements.txt
+
+      # 4. Roda os testes. Se algum falhar, o pytest termina com erro e o workflow fica vermelho.
+      #    Os testes nao acessam a internet nem precisam do produtos.csv real (que nao esta no
+      #    GitHub), entao rodam em qualquer maquina.
+      - name: Rodar os testes
+        run: python -m pytest -v
