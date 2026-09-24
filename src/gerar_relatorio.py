@@ -1,24 +1,27 @@
 # Este programa gera um relatorio HTML com as ultimas coletas de precos.
-import csv
 from collections import defaultdict
 from datetime import datetime
 from html import escape
 from pathlib import Path
 
+import banco
+# Reaproveitamos do main.py o caminho do banco e a formatacao de preco,
+# para nao repetir o mesmo codigo em dois lugares.
+from main import ARQUIVO_BANCO, formatar_preco
+
 
 PASTA_PROJETO = Path(__file__).resolve().parent.parent
-ARQUIVO_COLETAS = PASTA_PROJETO / "dados" / "coletas.csv"
-ARQUIVO_ERROS = PASTA_PROJETO / "dados" / "erros.csv"
 ARQUIVO_RELATORIO = PASTA_PROJETO / "relatorios" / "relatorio.html"
 
 
-def ler_csv(caminho_arquivo):
-    if not caminho_arquivo.exists() or caminho_arquivo.stat().st_size == 0:
-        return []
-
-    with open(caminho_arquivo, "r", newline="", encoding="utf-8") as arquivo_csv:
-        leitor_csv = csv.DictReader(arquivo_csv, delimiter=";")
-        return list(leitor_csv)
+def preparar_coleta(coleta):
+    # O banco guarda o preco como numero (ou None quando indisponivel).
+    # O HTML precisa de texto, entao criamos as versoes em texto aqui.
+    preco = coleta["preco"]
+    coleta["preco_texto"] = formatar_preco(preco) if preco is not None else ""
+    coleta["preco_numero"] = str(preco) if preco is not None else ""
+    coleta["mensagem"] = coleta["mensagem"] or ""
+    return coleta
 
 
 def agrupar_coletas_por_produto(coletas):
@@ -92,13 +95,34 @@ def criar_linha_erro(erro):
             <td>{escape(erro["data_erro"])}</td>
             <td>{escape(erro["produto_id"])}</td>
             <td>{escape(erro["tipo_erro"])}</td>
-            <td>{escape(erro["mensagem"])}</td>
+            <td>{escape(erro["mensagem"] or "")}</td>
             <td><a href="{escape(erro["url"])}" target="_blank" rel="noopener noreferrer">Ver no site</a></td>
         </tr>
     """
 
 
-def gerar_html(coletas, erros):
+def criar_linha_alerta(alerta, nomes_produtos):
+    # Seta e cor mostram se o preco subiu ou caiu.
+    variacao = alerta["variacao_percentual"]
+    classe_variacao = "variacao-alta" if variacao > 0 else "variacao-queda"
+    seta = "▲" if variacao > 0 else "▼"
+
+    # Nome do produto a partir das coletas; se o produto nunca foi coletado, fica so o ID.
+    nome_produto = nomes_produtos.get(alerta["produto_id"], "")
+
+    return f"""
+        <tr>
+            <td>{escape(alerta["data_alerta"])}</td>
+            <td><strong>{escape(alerta["produto_id"])}</strong> {escape(nome_produto)}</td>
+            <td>{escape(formatar_preco(alerta["preco_anterior"]))}</td>
+            <td>{escape(formatar_preco(alerta["preco_novo"]))}</td>
+            <td class="{classe_variacao}">{seta} {variacao:+.1f}%</td>
+            <td><a href="{escape(alerta["url"])}" target="_blank" rel="noopener noreferrer">Ver no site</a></td>
+        </tr>
+    """
+
+
+def gerar_html(coletas, erros, alertas):
     coletas_por_produto = agrupar_coletas_por_produto(coletas)
     produtos_ordenados = sorted(
         coletas_por_produto.items(),
@@ -115,6 +139,25 @@ def gerar_html(coletas, erros):
         linhas_erros = """
             <tr>
                 <td colspan="5">Nenhum erro registrado.</td>
+            </tr>
+        """
+
+    # Dicionario produto_id -> nome da ultima coleta, usado na tabela de alertas.
+    nomes_produtos = {
+        produto_id: historico[0]["produto_nome"]
+        for produto_id, historico in coletas_por_produto.items()
+    }
+
+    # Ultimos 20 alertas, do mais recente para o mais antigo.
+    # alertas[-20:] pega os 20 ultimos; reversed() inverte a ordem.
+    linhas_alertas = "\n".join(
+        criar_linha_alerta(alerta, nomes_produtos) for alerta in reversed(alertas[-20:])
+    )
+
+    if linhas_alertas == "":
+        linhas_alertas = """
+            <tr>
+                <td colspan="6">Nenhum alerta de variacao de preco.</td>
             </tr>
         """
 
@@ -157,7 +200,7 @@ def gerar_html(coletas, erros):
 
         .resumo {{
             display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 12px;
             margin-bottom: 24px;
         }}
@@ -314,8 +357,23 @@ def gerar_html(coletas, erros):
             text-transform: uppercase;
         }}
 
-        .secao-erros {{
+        .secao-erros, .secao-alertas {{
             margin-top: 32px;
+        }}
+
+        .secao-alertas {{
+            margin-bottom: 32px;
+        }}
+
+        /* Preco subiu: vermelho. Preco caiu: verde. */
+        .variacao-alta {{
+            color: #b42318;
+            font-weight: 700;
+        }}
+
+        .variacao-queda {{
+            color: #177245;
+            font-weight: 700;
         }}
 
         @media (max-width: 760px) {{
@@ -359,6 +417,33 @@ def gerar_html(coletas, erros):
                 <strong>{len(erros)}</strong>
                 <span>erros registrados</span>
             </div>
+            <div class="indicador">
+                <strong>{len(alertas)}</strong>
+                <span>alertas de preco</span>
+            </div>
+        </section>
+
+        <section class="secao-alertas">
+            <h2>Alertas de Variacao de Preco</h2>
+            <p class="subtitulo">
+                Precos que variaram mais de 50% em relacao a ultima coleta. Eles nao entram no
+                historico; se o mesmo preco aparecer na coleta seguinte, e confirmado e salvo.
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Produto</th>
+                        <th>Preco anterior</th>
+                        <th>Preco novo</th>
+                        <th>Variacao</th>
+                        <th>Link</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {linhas_alertas}
+                </tbody>
+            </table>
         </section>
 
         <section>
@@ -443,9 +528,17 @@ def gerar_html(coletas, erros):
 
 
 def main():
-    coletas = ler_csv(ARQUIVO_COLETAS)
-    erros = ler_csv(ARQUIVO_ERROS)
-    html = gerar_html(coletas, erros)
+    # Lemos tudo do banco de dados e fechamos a conexao logo em seguida.
+    conexao = banco.conectar(ARQUIVO_BANCO)
+
+    try:
+        coletas = [preparar_coleta(coleta) for coleta in banco.listar_coletas(conexao)]
+        erros = banco.listar_erros(conexao)
+        alertas = banco.listar_alertas(conexao)
+    finally:
+        conexao.close()
+
+    html = gerar_html(coletas, erros, alertas)
 
     ARQUIVO_RELATORIO.parent.mkdir(exist_ok=True)
 
