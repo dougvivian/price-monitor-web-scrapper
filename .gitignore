@@ -18,3 +18,6 @@ dados/produtos.csv
 
 # Diario pessoal de aprendizado (fica so local)
 aprendizado.md
+
+# Log da coleta diaria agendada
+logs/

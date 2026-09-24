@@ -46,6 +46,19 @@ python src/gerar_relatorio.py
 
 Depois, abra `relatorios/relatorio.html` no navegador.
 
+### Coleta automatica diaria
+
+O script `src/coleta_diaria.py` roda a coleta e gera o relatorio em sequencia, gravando
+tudo em `logs/coleta_diaria.log`. Para rodar sozinho todo dia no Windows, cadastre no
+Agendador de Tarefas (no Prompt de Comando):
+
+```bat
+schtasks /Create /TN "Monitor de Precos - coleta diaria" /SC DAILY /ST 09:00 ^
+  /TR "\"C:\caminho\para\pythonw.exe\" \"C:\caminho\do\projeto\src\coleta_diaria.py\""
+```
+
+`pythonw.exe` e o Python sem janela de terminal, para a coleta rodar em segundo plano.
+
 ### Testes
 
 ```bash
@@ -60,6 +73,7 @@ uma loja VTEX, e nao acessam a internet.
 ```text
 src/
   main.py              coleta os precos e valida as variacoes
+  coleta_diaria.py     roda coleta + relatorio e grava log (usado no agendamento)
   banco.py             acesso ao banco SQLite (todo o SQL do projeto fica aqui)
   gerar_relatorio.py   gera o relatorio HTML
 dados/
@@ -74,6 +88,7 @@ tests/
   test_extracao.py     testes da extracao de dados da pagina
   test_validacao.py    testes das regras de validacao de preco
   test_coleta.py       teste do fluxo completo, sem acessar o site
+  test_coleta_diaria.py testes do script de coleta diaria e do log
   test_banco.py        testes das consultas SQL (banco em memoria)
   test_relatorio.py    testes do relatorio HTML
   paginas/             paginas HTML sinteticas usadas nos testes
@@ -114,14 +129,17 @@ existir, o nome vem do JSON-LD.
 
 ## Roadmap
 
-- **v1 (em andamento):** 1 site, execucao manual.
+- **v1 (concluida):** 1 site, execucao manual.
   - [x] Coleta com tratamento de erros e historico em CSV
   - [x] Relatorio HTML
   - [x] Testes automatizados com paginas HTML sinteticas (sem acessar o site)
   - [x] Extracao via dados estruturados da pagina (JSON-LD / schema.org)
   - [x] Validacao dos dados (preco vazio ou variacao absurda gera alerta)
   - [x] Historico em SQLite
-- **v2:** mais concorrentes, produtos casados entre lojas pelo EAN, execucao agendada diaria.
+- **v2 (em andamento):**
+  - [x] Execucao agendada diaria (Agendador de Tarefas do Windows)
+  - [ ] Guardar o EAN dos produtos
+  - [ ] Mais concorrentes, com produtos casados entre lojas pelo EAN
 - **v3:** painel com graficos e alertas de mudanca de preco (Telegram/e-mail).
 
 ## Tecnologias
