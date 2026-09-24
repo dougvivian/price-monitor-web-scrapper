@@ -12,6 +12,18 @@ from main import ARQUIVO_BANCO, ARQUIVO_PRODUTOS, agora, calcular_variacao, form
 PASTA_PROJETO = Path(__file__).resolve().parent.parent
 ARQUIVO_RELATORIO = PASTA_PROJETO / "relatorios" / "relatorio.html"
 
+# O visual (CSS) e a interacao (JavaScript) do relatorio ficam em arquivos proprios,
+# para serem editados com a ajuda do editor. Na hora de gerar, o conteudo deles e
+# copiado para dentro do HTML: o relatorio final continua sendo um arquivo so, que
+# pode ser enviado por e-mail ou WhatsApp sem perder o visual.
+PASTA_MODELO = Path(__file__).resolve().parent / "relatorio"
+ARQUIVO_ESTILO = PASTA_MODELO / "estilo.css"
+ARQUIVO_SCRIPT = PASTA_MODELO / "interacao.js"
+
+
+def ler_arquivo_modelo(caminho):
+    return caminho.read_text(encoding="utf-8")
+
 
 def preparar_coleta(coleta):
     # O banco guarda o preco como numero (ou None quando indisponivel).
@@ -360,6 +372,8 @@ def gerar_html(coletas, erros, alertas, ultima_execucao=None, grupos=None):
     tabela_erros_antigos = criar_tabela_erros(list(reversed(erros_antigos)), "Nenhum erro anterior.")
     resumo_execucao = criar_resumo_execucao(ultima_execucao)
     data_geracao = agora()
+    estilo = ler_arquivo_modelo(ARQUIVO_ESTILO)
+    script = ler_arquivo_modelo(ARQUIVO_SCRIPT)
 
     # Dicionario produto_id -> nome da ultima coleta, usado na tabela de alertas.
     nomes_produtos = {
@@ -387,265 +401,7 @@ def gerar_html(coletas, erros, alertas, ultima_execucao=None, grupos=None):
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Monitor de Precos</title>
     <style>
-        body {{
-            margin: 0;
-            background: #f4f6f8;
-            color: #1f2933;
-            font-family: Arial, sans-serif;
-        }}
-
-        main {{
-            max-width: 1180px;
-            margin: 0 auto;
-            padding: 32px 20px;
-        }}
-
-        header {{
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            align-items: flex-end;
-            margin-bottom: 24px;
-        }}
-
-        h1, h2 {{
-            margin: 0;
-        }}
-
-        .subtitulo {{
-            margin-top: 8px;
-            color: #607080;
-        }}
-
-        .resumo {{
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: 12px;
-            margin-bottom: 24px;
-        }}
-
-        .indicador {{
-            background: #ffffff;
-            border: 1px solid #d9e0e7;
-            border-radius: 8px;
-            padding: 16px;
-        }}
-
-        .indicador strong {{
-            display: block;
-            font-size: 28px;
-            margin-bottom: 4px;
-        }}
-
-        .controles {{
-            display: grid;
-            grid-template-columns: minmax(240px, 1fr) auto;
-            gap: 12px;
-            align-items: center;
-            margin: 16px 0;
-        }}
-
-        .busca {{
-            width: 100%;
-            box-sizing: border-box;
-            border: 1px solid #c9d3dd;
-            border-radius: 8px;
-            font-size: 16px;
-            padding: 11px 12px;
-        }}
-
-        .filtros {{
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }}
-
-        .filtro-status {{
-            border: 1px solid #c9d3dd;
-            border-radius: 8px;
-            background: #ffffff;
-            color: #1f2933;
-            cursor: pointer;
-            font-weight: 700;
-            padding: 10px 12px;
-        }}
-
-        .filtro-status.ativo {{
-            background: #1f2933;
-            border-color: #1f2933;
-            color: #ffffff;
-        }}
-
-        .contador-filtro {{
-            color: #607080;
-            margin-bottom: 12px;
-        }}
-
-        .produto-card {{
-            background: #ffffff;
-            border: 1px solid #d9e0e7;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            overflow: hidden;
-        }}
-
-        summary {{
-            display: grid;
-            grid-template-columns: 1fr auto;
-            gap: 16px;
-            align-items: center;
-            cursor: pointer;
-            padding: 14px 16px;
-        }}
-
-        summary::marker {{
-            display: none;
-        }}
-
-        .produto-principal, .produto-meta {{
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            flex-wrap: wrap;
-        }}
-
-        .produto-id {{
-            color: #607080;
-            font-weight: 700;
-            min-width: 72px;
-        }}
-
-        .produto-nome {{
-            font-weight: 700;
-        }}
-
-        .data-coleta {{
-            color: #607080;
-            font-size: 13px;
-        }}
-
-        .preco {{
-            font-weight: 700;
-            font-size: 18px;
-        }}
-
-        .status {{
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 13px;
-            font-weight: 700;
-        }}
-
-        .status-disponivel {{
-            background: #e7f7ef;
-            color: #177245;
-        }}
-
-        .status-indisponivel {{
-            background: #fff3d9;
-            color: #9a5b00;
-        }}
-
-        .status-erro {{
-            background: #fde8e7;
-            color: #b42318;
-        }}
-
-        .erros-antigos {{
-            margin-top: 16px;
-        }}
-
-        .erros-antigos summary {{
-            display: block;
-            padding: 8px 0;
-            color: #607080;
-            font-weight: 700;
-        }}
-
-        a {{
-            color: #1d5fd1;
-            font-weight: 700;
-            text-decoration: none;
-        }}
-
-        a:hover {{
-            text-decoration: underline;
-        }}
-
-        .historico {{
-            border-top: 1px solid #d9e0e7;
-            padding: 0 16px 16px;
-            overflow-x: auto;
-        }}
-
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 14px;
-        }}
-
-        th, td {{
-            border-bottom: 1px solid #e7ecf1;
-            padding: 10px 8px;
-            text-align: left;
-            vertical-align: top;
-        }}
-
-        th {{
-            color: #607080;
-            font-size: 12px;
-            text-transform: uppercase;
-        }}
-
-        .secao-erros, .secao-alertas, .secao-comparativo {{
-            margin-top: 32px;
-        }}
-
-        .comparativo {{
-            background: #ffffff;
-            border: 1px solid #d9e0e7;
-            border-radius: 8px;
-            margin-top: 12px;
-            padding: 14px 16px;
-            overflow-x: auto;
-        }}
-
-        .comparativo h3 {{
-            margin: 0;
-        }}
-
-        .secao-alertas, .secao-comparativo {{
-            margin-bottom: 32px;
-        }}
-
-        /* Preco subiu: vermelho. Preco caiu: verde. */
-        .variacao-alta {{
-            color: #b42318;
-            font-weight: 700;
-        }}
-
-        .variacao-queda {{
-            color: #177245;
-            font-weight: 700;
-        }}
-
-        @media (max-width: 760px) {{
-            header, summary {{
-                display: block;
-            }}
-
-            .resumo {{
-                grid-template-columns: 1fr;
-            }}
-
-            .controles {{
-                grid-template-columns: 1fr;
-            }}
-
-            .produto-meta {{
-                margin-top: 10px;
-            }}
-        }}
+{estilo}
     </style>
 </head>
 <body>
@@ -739,47 +495,7 @@ def gerar_html(coletas, erros, alertas, ultima_execucao=None, grupos=None):
         </section>
     </main>
     <script>
-        const buscaProduto = document.querySelector("#buscaProduto");
-        const contadorFiltro = document.querySelector("#contadorFiltro");
-        const botoesFiltro = document.querySelectorAll(".filtro-status");
-        const cardsProdutos = document.querySelectorAll(".produto-card");
-        let statusSelecionado = "todos";
-
-        function aplicarFiltros() {{
-            const termoBusca = buscaProduto.value.trim().toLowerCase();
-            let totalVisivel = 0;
-
-            cardsProdutos.forEach((card) => {{
-                const textoBusca = card.dataset.busca;
-                const status = card.dataset.status;
-                const combinaBusca = textoBusca.includes(termoBusca);
-                const combinaStatus = statusSelecionado === "todos" || status === statusSelecionado;
-                const visivel = combinaBusca && combinaStatus;
-
-                card.style.display = visivel ? "" : "none";
-
-                if (visivel) {{
-                    totalVisivel += 1;
-                }}
-            }});
-
-            contadorFiltro.textContent = `${{totalVisivel}} produto(s) encontrado(s)`;
-        }}
-
-        buscaProduto.addEventListener("input", aplicarFiltros);
-
-        botoesFiltro.forEach((botao) => {{
-            botao.addEventListener("click", () => {{
-                statusSelecionado = botao.dataset.status;
-
-                botoesFiltro.forEach((item) => item.classList.remove("ativo"));
-                botao.classList.add("ativo");
-
-                aplicarFiltros();
-            }});
-        }});
-
-        aplicarFiltros();
+{script}
     </script>
 </body>
 </html>

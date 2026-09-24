@@ -222,3 +222,13 @@ def test_relatorio_sem_comparativos_mostra_aviso():
     html = gerar_html([criar_coleta("PRD-001", 10.0, "2026-09-24 09:00:00")], [], [])
 
     assert "Nenhum produto casado entre lojas ainda" in html
+
+
+def test_css_e_js_vao_para_dentro_do_html():
+    # O relatorio precisa ser um arquivo so: o CSS e o JS sao copiados para dentro dele,
+    # e nao ligados por <link> ou <script src>, que quebrariam ao enviar so o HTML.
+    html = gerar_html([], [], [])
+
+    assert "<link" not in html and "<script src" not in html
+    assert "font-family" in html               # veio do estilo.css
+    assert "addEventListener" in html          # veio do interacao.js
