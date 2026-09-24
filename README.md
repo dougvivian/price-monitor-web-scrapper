@@ -10,6 +10,7 @@
 ![pytest](https://img.shields.io/badge/testes-107-0A9EDC?logo=pytest&logoColor=white)
 [![Licença MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-green)](LICENSE)
 
+[Sobre](#sobre) ·
 [Experimente](#experimente-em-1-minuto) ·
 [Como funciona](#como-funciona) ·
 [Decisões técnicas](#decisões-técnicas)
@@ -19,6 +20,22 @@
 <sub>Imagem do modo demonstração, com lojas e produtos fictícios.</sub>
 
 </div>
+
+## Sobre
+
+Trabalho no varejo de materiais de construção, e a pesquisa de preços da concorrência
+era feita à mão, produto por produto. Este projeto automatiza isso: todo dia de manhã
+ele acessa as páginas dos produtos monitorados, extrai preço e disponibilidade, valida
+os dados, guarda o histórico e gera um relatório com o comparativo entre as lojas.
+
+| | |
+|---|---|
+| **Extração robusta** | Lê os dados estruturados da página (JSON-LD / schema.org), não o visual. Funciona em lojas VTEX e Shopify com o mesmo código. |
+| **Dados confiáveis** | Variação acima de 50% vira alerta em vez de entrar no histórico. EAN validado pelo dígito verificador. Na dúvida, registra erro em vez de chutar. |
+| **Comparativo entre lojas** | O mesmo produto é casado pelo código de barras; equivalentes de marcas diferentes, por um grupo no cadastro. |
+| **Relatório em um arquivo** | Abas, filtros, ordenação, gráfico de histórico em SVG, modo escuro e layout para celular. Sem framework. |
+| **Automação e testes** | Execução diária agendada com log, 107 testes sem internet e CI no GitHub Actions. |
+| **Coleta responsável** | Respeita o robots.txt, faz pausas e não contorna proteções anti-robô. |
 
 ## Experimente em 1 minuto
 
@@ -111,22 +128,26 @@ então não acessam a internet. Eles também rodam no **GitHub Actions** a cada 
 ## Estrutura
 
 ```text
-src/
-  main.py               coleta os preços, extrai os dados da página e valida
-  banco.py              acesso ao banco SQLite (todo o SQL do projeto fica aqui)
-  gerar_relatorio.py    gera o relatório HTML
-  coleta_diaria.py      roda coleta + relatório e grava log (usado no agendamento)
-  demo.py               modo demonstração com dados fictícios
-  relatorio/
-    estilo.css          visual do relatório (cores e espaçamentos em variáveis no topo)
-    interacao.js        abas, filtros e ordenação (JavaScript puro)
-dados/
-  produtos.exemplo.csv  modelo do cadastro de produtos
-  produtos.csv          cadastro real (fora do Git)
-  monitor.db            banco SQLite: coletas, erros, alertas, execucoes (fora do Git)
-relatorios/             relatórios gerados (fora do Git)
-tests/                  testes com pytest e páginas HTML sintéticas
+📦 price-monitor-web-scrapper
+├── 📂 src
+│   ├── 🐍 main.py              coleta os preços, extrai os dados da página e valida
+│   ├── 🐍 banco.py             acesso ao SQLite (todo o SQL do projeto fica aqui)
+│   ├── 🐍 gerar_relatorio.py   gera o relatório HTML
+│   ├── 🐍 coleta_diaria.py     coleta + relatório + log (usado no agendamento)
+│   ├── 🐍 demo.py              modo demonstração com dados fictícios
+│   └── 📂 relatorio
+│       ├── 🎨 estilo.css       visual (cores e espaçamentos em variáveis no topo)
+│       └── 📜 interacao.js     abas, filtros e ordenação (JavaScript puro)
+├── 📂 dados
+│   ├── 📄 produtos.exemplo.csv modelo do cadastro de produtos
+│   ├── 🔒 produtos.csv         cadastro real (fora do Git)
+│   └── 🔒 monitor.db           banco: coletas, erros, alertas, execucoes (fora do Git)
+├── 📂 relatorios               relatórios gerados (fora do Git)
+├── 📂 tests                    testes com pytest e páginas HTML sintéticas
+└── 📂 .github/workflows        testes automáticos a cada push
 ```
+
+<sub>🔒 = arquivo local, que não vai para o repositório.</sub>
 
 ## Como o preço é extraído
 
