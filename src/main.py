@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from time import sleep
 from urllib.parse import parse_qs, urlparse
+from urllib.robotparser import RobotFileParser
 
 import requests
 from bs4 import BeautifulSoup
@@ -24,6 +25,11 @@ LIMITE_VARIACAO = 0.5
 
 # Segundos de espera antes de baixar de novo uma pagina que veio incompleta.
 ESPERA_NOVA_TENTATIVA = 5
+
+# Nome do "robo" usado para consultar as regras do robots.txt.
+# Como nao enviamos um nome proprio nas requisicoes, seguimos as regras gerais ("*"),
+# que valem para qualquer robo.
+AGENTE_ROBOTS = "*"
 
 # Valor de disponibilidade padronizado pelo schema.org que indica produto em estoque.
 # Qualquer outro valor (OutOfStock, Discontinued, PreOrder...) tratamos como indisponivel.
@@ -350,6 +356,47 @@ def criar_erro(produto, tipo_erro, mensagem):
     }
 
 
+def carregar_robots(url_produto):
+    # O robots.txt fica sempre na raiz do site: https://site.com.br/robots.txt
+    # Montamos esse endereco a partir da URL do produto.
+    partes_url = urlparse(url_produto)
+    url_robots = f"{partes_url.scheme}://{partes_url.netloc}/robots.txt"
+
+    # RobotFileParser (biblioteca padrao do Python) entende as regras do robots.txt.
+    regras = RobotFileParser(url_robots)
+
+    # Seguimos o padrao oficial do robots.txt (RFC 9309):
+    #   - site sem robots.txt (erro 4xx): nao ha regras, tudo permitido;
+    #   - servidor com problema (erro 5xx) ou sem conexao: nao sabemos as regras,
+    #     entao por seguranca consideramos tudo bloqueado.
+    try:
+        resposta = requests.get(url_robots, timeout=8)
+    except requests.RequestException:
+        regras.disallow_all = True
+        return regras
+
+    if 400 <= resposta.status_code < 500:
+        regras.allow_all = True
+    elif resposta.status_code >= 500:
+        regras.disallow_all = True
+    else:
+        # splitlines() quebra o texto em uma lista de linhas, que e o que o parse() espera.
+        regras.parse(resposta.text.splitlines())
+
+    return regras
+
+
+def permitido_pelo_robots(url_produto, cache_robots):
+    # cache_robots guarda as regras ja baixadas de cada site (dominio -> regras),
+    # para baixar o robots.txt uma vez so por coleta, e nao uma vez por produto.
+    dominio = urlparse(url_produto).netloc
+
+    if dominio not in cache_robots:
+        cache_robots[dominio] = carregar_robots(url_produto)
+
+    return cache_robots[dominio].can_fetch(AGENTE_ROBOTS, url_produto)
+
+
 def pagina_completa(html):
     # As vezes o site responde com status 200, mas manda a pagina pela metade:
     # sem o bloco JSON-LD, que e de onde tiramos o preco.
@@ -369,9 +416,20 @@ def baixar_pagina(url):
     return resposta
 
 
-def coletar_produto(conexao, produto, ultimos_precos, ultimos_alertas):
+def coletar_produto(conexao, produto, ultimos_precos, ultimos_alertas, cache_robots):
     # Coleta um produto e grava o resultado no banco.
     # Devolve "coletado", "alerta" ou "erro", para o resumo final.
+
+    # Antes de acessar a pagina, conferimos se o robots.txt do site permite.
+    # Se nao permitir, a pagina NAO e acessada: so registramos o motivo.
+    if not permitido_pelo_robots(produto["url"], cache_robots):
+        banco.salvar_erro(conexao, criar_erro(
+            produto,
+            "robots",
+            "Pagina bloqueada pelo robots.txt do site (nao foi acessada).",
+        ))
+        return "erro"
+
     try:
         resposta = baixar_pagina(produto["url"])
 
@@ -447,9 +505,10 @@ def main():
         # Lemos do banco uma vez so, no comeco, os dados usados na validacao.
         ultimos_precos = banco.buscar_ultimos_precos(conexao)
         ultimos_alertas = banco.buscar_ultimos_alertas(conexao)
+        cache_robots = {}
 
         for produto in produtos:
-            resultado = coletar_produto(conexao, produto, ultimos_precos, ultimos_alertas)
+            resultado = coletar_produto(conexao, produto, ultimos_precos, ultimos_alertas, cache_robots)
             resultados[resultado] += 1
 
             # Fazemos uma pausa para nao enviar muitas requisicoes seguidas ao site.

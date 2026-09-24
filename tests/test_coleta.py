@@ -18,8 +18,8 @@ URL_VARIACAO = "https://www.loja-exemplo.com.br/telha-fibrocimento-ondulada-6mm/
 
 class RespostaFalsa:
     # Imita o objeto que o requests.get devolve, com so o que o main() usa.
-    def __init__(self, texto):
-        self.status_code = 200
+    def __init__(self, texto, status_code=200):
+        self.status_code = status_code
         self.text = texto
 
 
@@ -133,15 +133,98 @@ def test_sem_cadastro_de_produtos_avisa_e_nao_coleta(tmp_path, monkeypatch, caps
 
 class SiteFalso:
     # Imita um site que devolve uma sequencia de respostas, uma por chamada,
-    # e conta quantas vezes foi acessado.
-    def __init__(self, textos):
+    # e conta quantas vezes as paginas de produto foram acessadas.
+    # O robots.txt e respondido a parte (e contado a parte).
+    def __init__(self, textos, robots="", status_robots=200):
         self.textos = list(textos)
         self.acessos = 0
+        self.robots = robots
+        self.status_robots = status_robots
+        self.acessos_robots = 0
 
     def get(self, url, timeout):
+        if url.endswith("/robots.txt"):
+            self.acessos_robots += 1
+            return RespostaFalsa(self.robots, self.status_robots)
+
         texto = self.textos[min(self.acessos, len(self.textos) - 1)]
         self.acessos += 1
         return RespostaFalsa(texto)
+
+
+def ler_erros(arquivo_banco):
+    conexao = banco.conectar(arquivo_banco)
+    erros = banco.listar_erros(conexao)
+    conexao.close()
+    return erros
+
+
+def test_robots_bloqueando_a_pagina_impede_o_acesso(tmp_path, monkeypatch):
+    arquivo_banco = preparar_ambiente(tmp_path, monkeypatch, preco_anterior=80.0)
+    # Regra: nenhum robo pode acessar paginas que comecam com /telha.
+    site = SiteFalso([PAGINA_VARIACAO.read_text(encoding="utf-8")],
+                     robots="User-agent: *\nDisallow: /telha")
+    monkeypatch.setattr(main.requests, "get", site.get)
+
+    main.main()
+
+    erros = ler_erros(arquivo_banco)
+    assert site.acessos == 0          # a pagina do produto nem foi acessada
+    assert erros[0]["tipo_erro"] == "robots"
+
+
+def test_robots_permitindo_a_pagina(tmp_path, monkeypatch):
+    arquivo_banco = preparar_ambiente(tmp_path, monkeypatch, preco_anterior=80.0)
+    # Regra que bloqueia outra area do site (carrinho), mas nao a pagina de produto.
+    site = SiteFalso([PAGINA_VARIACAO.read_text(encoding="utf-8")],
+                     robots="User-agent: *\nDisallow: /checkout")
+    monkeypatch.setattr(main.requests, "get", site.get)
+
+    main.main()
+
+    coletas, _ = ler_banco(arquivo_banco)
+    assert site.acessos == 1
+    assert coletas[-1]["preco"] == 87.9
+
+
+def test_site_sem_robots_permite_tudo(tmp_path, monkeypatch):
+    arquivo_banco = preparar_ambiente(tmp_path, monkeypatch, preco_anterior=80.0)
+    site = SiteFalso([PAGINA_VARIACAO.read_text(encoding="utf-8")], status_robots=404)
+    monkeypatch.setattr(main.requests, "get", site.get)
+
+    main.main()
+
+    assert site.acessos == 1
+    assert ler_erros(arquivo_banco) == []
+
+
+def test_robots_com_erro_no_servidor_bloqueia_por_seguranca(tmp_path, monkeypatch):
+    arquivo_banco = preparar_ambiente(tmp_path, monkeypatch, preco_anterior=80.0)
+    site = SiteFalso([PAGINA_VARIACAO.read_text(encoding="utf-8")], status_robots=503)
+    monkeypatch.setattr(main.requests, "get", site.get)
+
+    main.main()
+
+    assert site.acessos == 0
+    assert ler_erros(arquivo_banco)[0]["tipo_erro"] == "robots"
+
+
+def test_robots_e_baixado_uma_vez_por_site(tmp_path, monkeypatch):
+    preparar_ambiente(tmp_path, monkeypatch, preco_anterior=80.0)
+    # Cadastro com 3 produtos do mesmo site.
+    arquivo_produtos = tmp_path / "produtos.csv"
+    with open(arquivo_produtos, "w", newline="", encoding="utf-8") as arquivo_csv:
+        escritor = csv.writer(arquivo_csv, delimiter=";")
+        escritor.writerow(["produto_id", "concorrente", "url", "sku", "ativo", "categoria", "observacao"])
+        for numero in range(1, 4):
+            escritor.writerow([f"PRD-00{numero}", "Loja A", URL_VARIACAO, "", "sim", "telha", ""])
+    site = SiteFalso([PAGINA_VARIACAO.read_text(encoding="utf-8")])
+    monkeypatch.setattr(main.requests, "get", site.get)
+
+    main.main()
+
+    assert site.acessos == 3
+    assert site.acessos_robots == 1
 
 
 def test_pagina_incompleta_e_baixada_de_novo(tmp_path, monkeypatch):
