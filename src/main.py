@@ -14,6 +14,11 @@ PASTA_PROJETO = Path(__file__).resolve().parent.parent
 ARQUIVO_PRODUTOS = PASTA_PROJETO / "dados" / "produtos.csv"
 ARQUIVO_COLETAS = PASTA_PROJETO / "dados" / "coletas.csv"
 ARQUIVO_ERROS = PASTA_PROJETO / "dados" / "erros.csv"
+ARQUIVO_ALERTAS = PASTA_PROJETO / "dados" / "alertas.csv"
+
+# Variacao maxima aceita entre o preco novo e o ultimo preco salvo do mesmo produto.
+# 0.5 = 50%. Acima disso o preco vira alerta e nao e salvo no historico.
+LIMITE_VARIACAO = 0.5
 
 # Valor de disponibilidade padronizado pelo schema.org que indica produto em estoque.
 # Qualquer outro valor (OutOfStock, Discontinued, PreOrder...) tratamos como indisponivel.
@@ -288,6 +293,93 @@ def salvar_erros(erros_coleta):
     salvar_linhas_csv(ARQUIVO_ERROS, campos, erros_coleta)
 
 
+def ler_csv(caminho_arquivo):
+    # Le um CSV e devolve uma lista de dicionarios (uma linha = um dicionario).
+    # Se o arquivo ainda nao existir, devolve lista vazia.
+    if not caminho_arquivo.exists() or caminho_arquivo.stat().st_size == 0:
+        return []
+
+    with open(caminho_arquivo, "r", newline="", encoding="utf-8") as arquivo_csv:
+        return list(csv.DictReader(arquivo_csv, delimiter=";"))
+
+
+def ler_ultimos_precos():
+    # Monta um dicionario produto_id -> ultimo preco salvo no historico.
+    # Como o coletas.csv esta em ordem de coleta, a ultima linha de cada produto
+    # sobrescreve as anteriores e sobra o preco mais recente.
+    # Linhas sem preco (produto indisponivel) sao ignoradas.
+    ultimos_precos = {}
+
+    for coleta in ler_csv(ARQUIVO_COLETAS):
+        if coleta["preco_numero"] != "":
+            ultimos_precos[coleta["produto_id"]] = float(coleta["preco_numero"])
+
+    return ultimos_precos
+
+
+def ler_ultimos_alertas():
+    # Monta um dicionario produto_id -> preco que gerou o ultimo alerta daquele produto.
+    ultimos_alertas = {}
+
+    for alerta in ler_csv(ARQUIVO_ALERTAS):
+        ultimos_alertas[alerta["produto_id"]] = float(alerta["preco_novo"])
+
+    return ultimos_alertas
+
+
+def calcular_variacao(preco_anterior, preco_novo):
+    # Variacao percentual em forma decimal. Exemplos:
+    #   de 100 para 150 -> 0.5  (subiu 50%)
+    #   de 100 para 40  -> -0.6 (caiu 60%)
+    return (preco_novo - preco_anterior) / preco_anterior
+
+
+def validar_preco(preco_anterior, preco_novo, preco_ultimo_alerta):
+    # Decide se um preco novo pode ser salvo no historico.
+    # Devolve True (pode salvar) ou False (vira alerta).
+
+    # Primeira coleta do produto: nao ha com o que comparar.
+    if preco_anterior is None:
+        return True
+
+    # abs() tira o sinal: tanto subir quanto cair demais contam como variacao absurda.
+    if abs(calcular_variacao(preco_anterior, preco_novo)) <= LIMITE_VARIACAO:
+        return True
+
+    # Variacao grande, mas o MESMO preco ja tinha gerado alerta na coleta anterior:
+    # o site confirmou o preco duas vezes seguidas, entao consideramos que e real.
+    # Sem essa regra, um aumento real acima do limite ficaria bloqueado para sempre.
+    if preco_ultimo_alerta == preco_novo:
+        return True
+
+    return False
+
+
+def salvar_alerta(produto, preco_anterior, preco_novo):
+    campos = [
+        "produto_id",
+        "concorrente",
+        "url",
+        "preco_anterior",
+        "preco_novo",
+        "variacao_percentual",
+        "data_alerta",
+    ]
+
+    alerta = {
+        "produto_id": produto["produto_id"],
+        "concorrente": produto["concorrente"],
+        "url": produto["url"],
+        "preco_anterior": preco_anterior,
+        "preco_novo": preco_novo,
+        # round(..., 1) arredonda para 1 casa decimal. Ex.: 0.61234 -> 61.2 (%).
+        "variacao_percentual": round(calcular_variacao(preco_anterior, preco_novo) * 100, 1),
+        "data_alerta": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+    salvar_linhas_csv(ARQUIVO_ALERTAS, campos, [alerta])
+
+
 def criar_erro(produto, tipo_erro, mensagem):
     return {
         "produto_id": produto["produto_id"],
@@ -306,6 +398,11 @@ def main():
     produtos = ler_produtos()
     dados_coletados = []
     erros_coleta = []
+    alertas_coleta = []
+
+    # Lemos o historico uma vez so, no comeco, para validar os precos novos.
+    ultimos_precos = ler_ultimos_precos()
+    ultimos_alertas = ler_ultimos_alertas()
 
     for produto in produtos:
         try:
@@ -323,8 +420,26 @@ def main():
                 continue
 
             dados_produto = extrair_dados_produto(resposta.text, produto)
-            dados_coletados.append(dados_produto)
-            salvar_coletas([dados_produto])
+            produto_id = produto["produto_id"]
+            preco_novo = dados_produto["preco_numero"]
+
+            # So validamos quando ha preco (produto indisponivel nao tem preco para comparar).
+            preco_valido = preco_novo == "" or validar_preco(
+                ultimos_precos.get(produto_id),
+                preco_novo,
+                ultimos_alertas.get(produto_id),
+            )
+
+            if preco_valido:
+                dados_coletados.append(dados_produto)
+                salvar_coletas([dados_produto])
+
+                if preco_novo != "":
+                    ultimos_precos[produto_id] = preco_novo
+            else:
+                # Variacao absurda: registramos o alerta e NAO salvamos no historico.
+                salvar_alerta(produto, ultimos_precos[produto_id], preco_novo)
+                alertas_coleta.append(produto_id)
 
         except requests.RequestException as erro:
             erro_coleta = criar_erro(produto, "requisicao", str(erro))
@@ -348,6 +463,7 @@ def main():
     print("Produtos ativos:", len(produtos))
     print("Produtos atualizados:", len(dados_coletados))
     print("Produtos com erro:", len(erros_coleta))
+    print("Alertas de variacao de preco:", len(alertas_coleta))
 
 
 # Quando rodamos "python src/main.py", o Python coloca o valor "__main__" em __name__,

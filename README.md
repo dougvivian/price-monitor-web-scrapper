@@ -15,6 +15,10 @@ produto por produto. O projeto tambem e um estudo de automacao, coleta e tratame
 - Salva cada coleta em `dados/coletas.csv`, montando um historico de precos.
 - Registra falhas (site fora do ar, preco nao encontrado etc.) em `dados/erros.csv`,
   sem interromper a coleta dos outros produtos.
+- Valida cada preco antes de salvar: se ele variar mais de 50% em relacao a ultima
+  coleta do produto, vira um alerta em `dados/alertas.csv` e nao entra no historico.
+  Se o mesmo preco aparecer de novo na coleta seguinte, ele e considerado confirmado e
+  e salvo (assim um aumento real nao fica bloqueado para sempre).
 - Gera `relatorios/relatorio.html` com o ultimo preco de cada produto, historico,
   busca e filtro por disponibilidade.
 
@@ -56,10 +60,13 @@ dados/
                        colunas: produto_id, concorrente, url, sku, ativo, categoria, observacao
   coletas.csv          historico de precos coletados
   erros.csv            falhas de coleta
+  alertas.csv          precos com variacao acima de 50% (nao salvos no historico)
 relatorios/
   relatorio.html       relatorio gerado
 tests/
-  test_extracao.py     testes automatizados da extracao
+  test_extracao.py     testes da extracao de dados da pagina
+  test_validacao.py    testes das regras de validacao de preco
+  test_coleta.py       teste do fluxo completo, sem acessar o site
   paginas/             paginas HTML salvas usadas nos testes
 aprendizado.md         diario do desenvolvimento e conceitos aprendidos
 ```
@@ -104,7 +111,7 @@ existir, o nome vem do JSON-LD.
   - [x] Relatorio HTML
   - [x] Testes automatizados com paginas HTML salvas (sem acessar o site)
   - [x] Extracao via dados estruturados da pagina (JSON-LD / schema.org)
-  - [ ] Validacao dos dados (preco vazio ou variacao absurda gera alerta)
+  - [x] Validacao dos dados (preco vazio ou variacao absurda gera alerta)
   - [ ] Historico em SQLite
 - **v2:** mais concorrentes, produtos casados entre lojas pelo EAN, execucao agendada diaria.
 - **v3:** painel com graficos e alertas de mudanca de preco (Telegram/e-mail).
