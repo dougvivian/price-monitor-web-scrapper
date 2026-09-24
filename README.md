@@ -77,7 +77,6 @@ tests/
   test_banco.py        testes das consultas SQL (banco em memoria)
   test_relatorio.py    testes do relatorio HTML
   paginas/             paginas HTML sinteticas usadas nos testes
-aprendizado.md         diario do desenvolvimento e conceitos aprendidos
 ```
 
 ## Coleta responsavel

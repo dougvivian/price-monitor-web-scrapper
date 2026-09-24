@@ -15,3 +15,8 @@ relatorios/relatorio.html
 # Cadastro real de produtos monitorados (informacao comercial, fica so local)
 # Modelo publico: dados/produtos.exemplo.csv
 dados/produtos.csv
+
+
+aprendizado.md
+# Diario pessoal de aprendizado (fica so local)
+aprendizado.md
