@@ -23,7 +23,8 @@ produto por produto. O projeto tambem e um estudo de automacao, coleta e tratame
 - Gera `relatorios/relatorio.html` com os alertas de variacao de preco, o ultimo preco
   de cada produto, historico, busca e filtro por disponibilidade.
 
-Concorrente suportado no momento: **Loja A**.
+Funciona com lojas na plataforma **VTEX** que publicam dados estruturados
+**schema.org** (JSON-LD) nas paginas de produto, padrao comum no varejo online brasileiro.
 
 ## Como rodar
 
@@ -33,10 +34,13 @@ Requisitos: Python 3.10 ou superior.
 # 1. Instalar as dependencias
 pip install -r requirements.txt
 
-# 2. Coletar os precos (acessa o site dos concorrentes)
+# 2. Criar o cadastro de produtos a partir do modelo e preencher com os seus produtos
+cp dados/produtos.exemplo.csv dados/produtos.csv
+
+# 3. Coletar os precos (acessa o site dos concorrentes)
 python src/main.py
 
-# 3. Gerar o relatorio HTML a partir do banco de dados
+# 4. Gerar o relatorio HTML a partir do banco de dados
 python src/gerar_relatorio.py
 ```
 
@@ -48,7 +52,8 @@ Depois, abra `relatorios/relatorio.html` no navegador.
 python -m pytest
 ```
 
-Os testes usam paginas HTML salvas em `tests/paginas/` e nao acessam a internet.
+Os testes usam paginas HTML sinteticas em `tests/paginas/`, que imitam a estrutura de
+uma loja VTEX, e nao acessam a internet.
 
 ## Estrutura
 
@@ -58,7 +63,8 @@ src/
   banco.py             acesso ao banco SQLite (todo o SQL do projeto fica aqui)
   gerar_relatorio.py   gera o relatorio HTML
 dados/
-  produtos.csv         cadastro dos produtos monitorados (editavel no Excel)
+  produtos.exemplo.csv modelo do cadastro de produtos
+  produtos.csv         cadastro real dos produtos monitorados (editavel no Excel, fora do Git)
                        colunas: produto_id, concorrente, url, sku, ativo, categoria, observacao
   monitor.db           banco SQLite, criado na primeira coleta (fora do Git)
                        tabelas: coletas, erros, alertas
@@ -70,7 +76,7 @@ tests/
   test_coleta.py       teste do fluxo completo, sem acessar o site
   test_banco.py        testes das consultas SQL (banco em memoria)
   test_relatorio.py    testes do relatorio HTML
-  paginas/             paginas HTML salvas usadas nos testes
+  paginas/             paginas HTML sinteticas usadas nos testes
 aprendizado.md         diario do desenvolvimento e conceitos aprendidos
 ```
 
@@ -97,7 +103,7 @@ O monitor escolhe a oferta certa assim:
 Produto fora de estoque fica como `indisponivel`, sem preco; o preco anunciado vai
 para a mensagem, para consulta.
 
-Em lojas da plataforma VTEX (como a Loja A), a pagina tambem traz um objeto
+Em lojas da plataforma VTEX, a pagina tambem traz um objeto
 `__STATE__` com os dados de cada variacao. O monitor usa esse objeto como complemento,
 para pegar o nome completo da variacao (ex.: `Telha ... 2,13 x 1,10m`). Se ele nao
 existir, o nome vem do JSON-LD.
@@ -105,14 +111,14 @@ existir, o nome vem do JSON-LD.
 ## Limitacoes conhecidas
 
 - O EAN (codigo de barras), necessario para casar produtos entre lojas na v2, nao vem
-  no JSON-LD da Loja A. Ele existe nos dados VTEX da pagina, mas ainda nao e salvo.
+  no JSON-LD dessas lojas. Ele existe nos dados VTEX da pagina, mas ainda nao e salvo.
 
 ## Roadmap
 
 - **v1 (em andamento):** 1 site, execucao manual.
   - [x] Coleta com tratamento de erros e historico em CSV
   - [x] Relatorio HTML
-  - [x] Testes automatizados com paginas HTML salvas (sem acessar o site)
+  - [x] Testes automatizados com paginas HTML sinteticas (sem acessar o site)
   - [x] Extracao via dados estruturados da pagina (JSON-LD / schema.org)
   - [x] Validacao dos dados (preco vazio ou variacao absurda gera alerta)
   - [x] Historico em SQLite
