@@ -106,7 +106,7 @@ existir, o nome vem do JSON-LD.
 
 ## Roadmap
 
-- **v1 (em andamento):** 1 site, 10 produtos, execucao manual.
+- **v1 (em andamento):** 1 site, execucao manual.
   - [x] Coleta com tratamento de erros e historico em CSV
   - [x] Relatorio HTML
   - [x] Testes automatizados com paginas HTML salvas (sem acessar o site)
