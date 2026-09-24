@@ -542,13 +542,15 @@ def criar_painel_historico(produto_id, historico):
 
 def criar_seletor_historico(produtos_ordenados):
     # <select> com os produtos separados por loja (<optgroup>).
-    # Ja vem escolhido o produto com mais coletas COM PRECO: e o que tem o grafico mais
-    # interessante (um produto sempre indisponivel nao tem grafico).
-    mais_coletado = max(
-        produtos_ordenados,
-        key=lambda item: sum(1 for coleta in item[1] if coleta["preco"] is not None),
-        default=("", []),
-    )[0]
+    # Ja vem escolhido o produto com o grafico mais interessante:
+    #   1o: mais coletas COM PRECO (um produto sempre indisponivel nao tem grafico);
+    #   2o: no empate, mais precos diferentes (um grafico reto nao mostra nada).
+    # A chave de ordenacao e uma tupla: compara o 1o item e, se empatar, o 2o.
+    def interesse(item):
+        precos = [coleta["preco"] for coleta in item[1] if coleta["preco"] is not None]
+        return (len(precos), len(set(precos)))
+
+    mais_coletado = max(produtos_ordenados, key=interesse, default=("", []))[0]
     por_loja = defaultdict(list)
 
     for produto_id, historico in produtos_ordenados:
@@ -838,9 +840,13 @@ def gerar_html(coletas, erros, alertas, ultima_execucao=None, grupos=None, categ
 """
 
 
-def main():
+def gerar_relatorio(arquivo_banco, arquivo_relatorio, cadastro):
+    # Gera o relatorio a partir de um banco e de um cadastro quaisquer.
+    # Fica separado do main() para o modo demonstracao (demo.py) usar o mesmo codigo
+    # com um banco de dados ficticio, sem tocar no banco real.
+
     # Lemos tudo do banco de dados e fechamos a conexao logo em seguida.
-    conexao = banco.conectar(ARQUIVO_BANCO)
+    conexao = banco.conectar(arquivo_banco)
 
     try:
         coletas = [preparar_coleta(coleta) for coleta in banco.listar_coletas(conexao)]
@@ -851,21 +857,24 @@ def main():
         conexao.close()
 
     # Grupos de equivalencia e categorias vem do cadastro.
-    # Sem produtos.csv, o comparativo usa so o EAN e os filtros de categoria ficam vazios.
-    cadastro = ler_cadastro() if ARQUIVO_PRODUTOS.exists() else []
-
     html = gerar_html(
         coletas, erros, alertas, ultima_execucao,
         grupos=ler_grupos(cadastro),
         categorias=ler_categorias(cadastro),
     )
 
-    ARQUIVO_RELATORIO.parent.mkdir(exist_ok=True)
+    arquivo_relatorio.parent.mkdir(exist_ok=True)
 
-    with open(ARQUIVO_RELATORIO, "w", encoding="utf-8") as arquivo_html:
+    with open(arquivo_relatorio, "w", encoding="utf-8") as arquivo_html:
         arquivo_html.write(html)
 
-    print("Relatorio gerado:", ARQUIVO_RELATORIO)
+    print("Relatorio gerado:", arquivo_relatorio)
+
+
+def main():
+    # Sem produtos.csv, o comparativo usa so o EAN e os filtros de categoria ficam vazios.
+    cadastro = ler_cadastro() if ARQUIVO_PRODUTOS.exists() else []
+    gerar_relatorio(ARQUIVO_BANCO, ARQUIVO_RELATORIO, cadastro)
 
 
 # So gera o relatorio quando rodamos "python src/gerar_relatorio.py" diretamente.
